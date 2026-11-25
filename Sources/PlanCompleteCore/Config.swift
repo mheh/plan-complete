@@ -10,7 +10,7 @@ public struct Config: Sendable, Equatable, Codable {
     public var provider: ProviderKind = .llamaInfill
     public var model: String = "default"
     public var apiKey: String? = nil
-    public var guide: String = "PLAN.md"
+    public var guide: String = Config.defaultGuide
     public var guideTokenBudget: Int = 1200
     public var maxTokens: Int = 64
     public var maxLines: Int = 12
@@ -44,14 +44,38 @@ public struct Config: Sendable, Equatable, Codable {
         useScope = try c.decodeIfPresent(Bool.self, forKey: .useScope) ?? d.useScope
     }
 
-    /// Defaults, then the global file, then `<root>/.plan-complete.json`. Each file sets only the fields it names.
+    public static let defaultGuide = "PLAN.md"
+
+    /// Defaults, the global file, then `<root>/.plan-complete.json`. Each layer sets only the fields it names.
+    /// Only the repo file can name the plan; a `guide` anywhere else is dropped.
     public static func load(root: URL, globalFile: URL? = Config.globalFile) throws -> Config {
         var config = Config()
-        for url in [globalFile, root.appendingPathComponent(fileName)].compactMap({ $0 }) {
-            guard let data = try? Data(contentsOf: url) else { continue }
+        if let globalFile, let data = try? Data(contentsOf: globalFile) {
+            config = try config.merged(with: try JSONValue.decode(data).removing(guideKey))
+        }
+        if let data = try? Data(contentsOf: root.appendingPathComponent(fileName)) {
             config = try config.merged(with: try JSONValue.decode(data))
         }
+        config.guide = safeGuide(config.guide)
         return config
+    }
+
+    /// Editor overrides apply to every field but the plan.
+    public func applyingEditor(_ overrides: JSONValue?) throws -> Config {
+        var config = try merged(with: overrides?.removing(Self.guideKey))
+        config.guide = guide
+        return config
+    }
+
+    static let guideKey = "guide"
+
+    /// A relative path inside the repository, or `PLAN.md`.
+    public static func safeGuide(_ value: String) -> String {
+        let trimmed = value.trimmingCharacters(in: .whitespaces)
+        let parts = trimmed.split(separator: "/", omittingEmptySubsequences: true)
+        guard !trimmed.isEmpty, !trimmed.hasPrefix("/"), !trimmed.hasPrefix("~"),
+              !parts.contains("..") else { return defaultGuide }
+        return trimmed
     }
 
     /// `$XDG_CONFIG_HOME/plan-complete/config.json`, or `~/.config/plan-complete/config.json`.

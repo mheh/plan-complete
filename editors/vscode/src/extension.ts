@@ -7,13 +7,29 @@ import {
 } from "vscode-languageclient/node";
 
 let client: LanguageClient | undefined;
+let status: vscode.StatusBarItem;
+let workspaceState: vscode.Memento;
+let lastStatus: PlanStatus = { active: false, reason: "starting" };
+
+const enabledKey = "planComplete.enabled";
+
+interface PlanStatus {
+  active: boolean;
+  reason: string;
+}
 
 export async function activate(context: vscode.ExtensionContext) {
+  workspaceState = context.workspaceState;
+  status = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Right, 100);
+  status.command = "planComplete.toggle";
   context.subscriptions.push(
+    status,
     vscode.commands.registerCommand("planComplete.restart", async () => {
       await stop();
       await start(context);
     }),
+    vscode.commands.registerCommand("planComplete.toggle", toggle),
+    vscode.commands.registerCommand("planComplete.status", () => lastStatus),
     vscode.workspace.onDidChangeConfiguration(async (event) => {
       if (event.affectsConfiguration("planComplete")) {
         await stop();
@@ -21,11 +37,31 @@ export async function activate(context: vscode.ExtensionContext) {
       }
     }),
   );
+  showStatus({ active: false, reason: "starting" });
   await start(context);
 }
 
 export async function deactivate() {
   await stop();
+}
+
+function isEnabled(): boolean {
+  return workspaceState.get<boolean>(enabledKey, true);
+}
+
+async function toggle() {
+  const enabled = !isEnabled();
+  await workspaceState.update(enabledKey, enabled);
+  await client?.sendRequest("planComplete/setEnabled", { enabled });
+}
+
+function showStatus(state: PlanStatus) {
+  lastStatus = state;
+  status.text = state.active ? "$(sparkle) Plan: on" : "$(circle-slash) Plan: off";
+  status.tooltip = state.active
+    ? `Plan Complete follows ${state.reason}. Click to turn it off for this workspace.`
+    : `Plan Complete is off: ${state.reason}. Click to ${isEnabled() ? "check again" : "turn it on"}.`;
+  status.show();
 }
 
 async function start(context: vscode.ExtensionContext) {
@@ -43,11 +79,15 @@ async function start(context: vscode.ExtensionContext) {
       : undefined,
   };
   client = new LanguageClient("planComplete", "Plan Complete", serverOptions, clientOptions);
+  client.onNotification("planComplete/status", showStatus);
   context.subscriptions.push(client);
   try {
     await client.start();
-  } catch (error) {
-    void vscode.window.showErrorMessage(`Plan Complete: cannot start "${command}". Set planComplete.serverPath to the full path of the binary.`);
+    if (!isEnabled()) await client.sendRequest("planComplete/setEnabled", { enabled: false });
+  } catch {
+    showStatus({ active: false, reason: "server did not start" });
+    void vscode.window.showErrorMessage(
+      `Plan Complete: cannot start "${command}". Set planComplete.serverPath to the full path of the binary.`);
   }
 }
 
@@ -65,17 +105,13 @@ async function stop() {
 const withSignatureHelp: NonNullable<LanguageClientOptions["middleware"]>["provideInlineCompletionItems"] =
   async (document, position, context, token, next) => {
     const extra = await signatureContext(document, position);
-    if (!extra || !client) {
-      return next(document, position, context, token);
-    }
+    if (!extra || !client) return next(document, position, context, token);
     const params = {
       ...client.code2ProtocolConverter.asInlineCompletionParams(document, position, context),
       extraContext: [extra],
     };
     const result = await client.sendRequest("textDocument/inlineCompletion", params, token);
-    if (token.isCancellationRequested) {
-      return null;
-    }
+    if (token.isCancellationRequested) return null;
     return client.protocol2CodeConverter.asInlineCompletionResult(result as never, token);
   };
 
@@ -85,9 +121,7 @@ async function signatureContext(document: vscode.TextDocument, position: vscode.
       "vscode.executeSignatureHelpProvider", document.uri, position),
     new Promise<undefined>((resolve) => setTimeout(() => resolve(undefined), 150)),
   ]);
-  if (!help || help.signatures.length === 0) {
-    return undefined;
-  }
+  if (!help || help.signatures.length === 0) return undefined;
   const lines = help.signatures.map((signature) => {
     const doc = typeof signature.documentation === "string"
       ? signature.documentation

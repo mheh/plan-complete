@@ -14,6 +14,18 @@ public actor Engine {
     private var chunks: [GuideChunk] = []
     private var guideSignature: [String: Date] = [:]
     private var lastGuideCheck: Date = .distantPast
+    private var planState: PlanState = .noConfig
+    private var lastStateCheck: Date = .distantPast
+    public private(set) var enabled = true
+    /// Only `probe --no-guide` sets it.
+    public var bypassPlanRule = false
+
+    public func setBypassPlanRule(_ value: Bool) { bypassPlanRule = value }
+
+    public func setEnabled(_ value: Bool) {
+        enabled = value
+        lastStateCheck = .distantPast
+    }
     private var cache = LRUCache<String, Entry>(capacity: 256)
     private var recent: [Entry] = []
 
@@ -35,7 +47,16 @@ public actor Engine {
         self.provider = provider ?? makeProvider(config)
         resetCaches()
         lastGuideCheck = .distantPast
+        lastStateCheck = .distantPast
         guideSignature = [:]
+    }
+
+    /// Rechecked at most once a second. Off means every completion returns at once, with no model call.
+    public func state(now: Date = Date()) -> PlanState {
+        guard now.timeIntervalSince(lastStateCheck) >= 1 else { return planState }
+        lastStateCheck = now
+        planState = PlanState.check(root: root, guide: config.guide, enabled: enabled)
+        return planState
     }
 
     /// Reloads when a guide file changed, checking at most once a second.
@@ -109,6 +130,7 @@ public actor Engine {
 
     public func complete(document: TextDocument, line: Int, utf16Column: Int,
                          editorContext: [ExtraFile] = []) async throws -> Completion {
+        if !bypassPlanRule, !state().isOn { return Completion(text: "", sources: [], fromCache: false, raw: "") }
         let prepared = prepare(document: document, line: line, utf16Column: utf16Column, editorContext: editorContext)
         let request = prepared.request
         let key = Self.cacheKey(request)

@@ -20,6 +20,17 @@ struct SlowProvider: CompletionProvider {
 }
 
 @Suite struct LSPServerTests {
+    let root: URL = {
+        let url = FileManager.default.temporaryDirectory.appendingPathComponent("pc-lsp-\(UUID().uuidString)")
+        try? FileManager.default.createDirectory(at: url, withIntermediateDirectories: true)
+        try? "{}".write(to: url.appendingPathComponent(".plan-complete.json"), atomically: true, encoding: .utf8)
+        try? "## Plan\nx".write(to: url.appendingPathComponent("PLAN.md"), atomically: true, encoding: .utf8)
+        return url
+    }()
+
+    var rootURI: String { root.absoluteString }
+    var fileURI: String { root.appendingPathComponent("a.swift").absoluteString }
+
     func makeServer(reply: String, delayMs: Int = 0) -> (LSPServer, Box) {
         let box = Box()
         let server = LSPServer(send: { box.append($0) }, makeEngine: { root, config in
@@ -40,15 +51,15 @@ struct SlowProvider: CompletionProvider {
 
     func open(_ server: LSPServer, text: String) async {
         await server.handle(["jsonrpc": "2.0", "id": 1, "method": "initialize",
-                             "params": ["rootUri": "file:///tmp/pc-lsp-test", "capabilities": .object([:])]])
+                             "params": ["rootUri": .string(rootURI), "capabilities": .object([:])]])
         await server.handle(["jsonrpc": "2.0", "method": "textDocument/didOpen",
-                             "params": ["textDocument": ["uri": "file:///tmp/pc-lsp-test/a.swift", "languageId": "swift",
+                             "params": ["textDocument": ["uri": .string(fileURI), "languageId": "swift",
                                                          "version": 1, "text": .string(text)]]])
     }
 
     func request(_ id: Int, line: Int, character: Int, context: JSONValue = ["triggerKind": 2]) -> JSONValue {
         ["jsonrpc": "2.0", "id": .int(id), "method": "textDocument/inlineCompletion",
-         "params": ["textDocument": ["uri": "file:///tmp/pc-lsp-test/a.swift"],
+         "params": ["textDocument": ["uri": .string(fileURI)],
                     "position": ["line": .int(line), "character": .int(character)], "context": context]]
     }
 
@@ -68,7 +79,7 @@ struct SlowProvider: CompletionProvider {
         let (server, box) = makeServer(reply: "x")
         await open(server, text: "let a = 1\n")
         await server.handle(["jsonrpc": "2.0", "method": "textDocument/didChange",
-                             "params": ["textDocument": ["uri": "file:///tmp/pc-lsp-test/a.swift", "version": 2],
+                             "params": ["textDocument": ["uri": .string(fileURI), "version": 2],
                                         "contentChanges": [["range": ["start": ["line": 1, "character": 0],
                                                                       "end": ["line": 1, "character": 0]],
                                                             "text": "let b = "]]]])
@@ -116,5 +127,40 @@ struct SlowProvider: CompletionProvider {
         #expect(try reader.next() == ["a": 1])
         #expect(try reader.next() == ["a": 1])
         #expect(try reader.next() == nil)
+    }
+}
+
+@Suite struct LSPStatusTests {
+    func makeRoot(plan: Bool) -> URL {
+        let url = FileManager.default.temporaryDirectory.appendingPathComponent("pc-lsp-\(UUID().uuidString)")
+        try? FileManager.default.createDirectory(at: url, withIntermediateDirectories: true)
+        try? "{}".write(to: url.appendingPathComponent(".plan-complete.json"), atomically: true, encoding: .utf8)
+        if plan { try? "## Plan\nx".write(to: url.appendingPathComponent("PLAN.md"), atomically: true, encoding: .utf8) }
+        return url
+    }
+
+    func statuses(_ box: Box) -> [JSONValue] {
+        box.messages.filter { $0["method"] == "planComplete/status" }.compactMap { $0["params"] }
+    }
+
+    @Test func statusFollowsThePlan() async throws {
+        let root = makeRoot(plan: false)
+        let box = Box()
+        let server = LSPServer(send: { box.append($0) }, makeEngine: { r, c in
+            Engine(root: r, config: c, provider: SlowProvider(reply: "z", delayMs: 0))
+        })
+        await server.handle(["jsonrpc": "2.0", "id": 1, "method": "initialize",
+                             "params": ["rootUri": .string(root.absoluteString), "capabilities": .object([:])]])
+        await server.handle(["jsonrpc": "2.0", "method": "initialized", "params": .object([:])])
+        #expect(statuses(box).last == ["active": false, "reason": "no PLAN.md"])
+
+        try "## Plan\nx".write(to: root.appendingPathComponent("PLAN.md"), atomically: true, encoding: .utf8)
+        try await Task.sleep(for: .milliseconds(1100))
+        await server.handle(["jsonrpc": "2.0", "method": "textDocument/didSave",
+                             "params": ["textDocument": ["uri": .string(root.appendingPathComponent("PLAN.md").absoluteString)]]])
+        #expect(statuses(box).last == ["active": true, "reason": "PLAN.md"])
+
+        await server.handle(["jsonrpc": "2.0", "id": 2, "method": "planComplete/setEnabled", "params": ["enabled": false]])
+        #expect(statuses(box).last == ["active": false, "reason": "turned off"])
     }
 }

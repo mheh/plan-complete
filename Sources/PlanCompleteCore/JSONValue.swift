@@ -79,3 +79,11 @@ extension JSONValue: ExpressibleByStringLiteral, ExpressibleByIntegerLiteral, Ex
     }
     public init(nilLiteral: ()) { self = .null }
 }
+
+extension JSONValue {
+    public func removing(_ key: String) -> JSONValue {
+        guard case .object(var object) = self else { return self }
+        object[key] = nil
+        return .object(object)
+    }
+}

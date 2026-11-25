@@ -36,14 +36,15 @@ vim.api.nvim_create_autocmd("LspAttach", {
             table.insert(parts, "\n" .. table.concat(p))
           end
         end
+        io.stdout:write(("status: %s\n"):format(require("plan_complete").statusline()))
         io.stdout:write(("ghost (%d ms, mode %s): %s\n"):format(vim.uv.now() - started, vim.api.nvim_get_mode().mode, table.concat(parts)))
         vim.lsp.inline_completion.get()
         vim.defer_fn(function()
           finish(0, "after accept: " .. vim.api.nvim_buf_get_lines(args.buf, line - 1, line, false)[1])
         end, 50)
-      elseif vim.uv.now() - started > 10000 then
+      elseif vim.uv.now() - started > (vim.env.PC_EXPECT == "off" and 4000 or 10000) then
         timer:stop()
-        finish(1, "FAIL: no ghost text, mode " .. vim.api.nvim_get_mode().mode)
+        finish(vim.env.PC_EXPECT == "off" and 0 or 1, "no ghost text; status: " .. require("plan_complete").statusline())
       end
     end))
   end,

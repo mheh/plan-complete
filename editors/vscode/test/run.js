@@ -17,7 +17,7 @@ const { runTests } = require("@vscode/test-electron");
     extensionDevelopmentPath: path.resolve(__dirname, ".."),
     extensionTestsPath: path.resolve(__dirname, "suite.js"),
     launchArgs: [findRoot(workspace), "--disable-extensions", "--user-data-dir", userDir, "--skip-welcome", "--disable-workspace-trust"],
-    extensionTestsEnv: { PC_FILE: path.resolve(file), PC_LINE: line, PC_COL: col, PC_RESULT: result },
+    extensionTestsEnv: { PC_FILE: path.resolve(file), PC_LINE: line, PC_COL: col, PC_RESULT: result, PC_EXPECT: process.env.PC_EXPECT || "on" },
   });
   const report = JSON.parse(fs.readFileSync(result, "utf8"));
   console.log(JSON.stringify(report, null, 2));

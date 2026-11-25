@@ -38,7 +38,7 @@ swift build -c release
 ln -s "$PWD/.build/release/plan-complete" /usr/local/bin/plan-complete
 ```
 
-### 2. Point it at your model, once
+### 2. Point it at your model, once, and opt a repository in
 
 `~/.config/plan-complete/config.json` (or `$XDG_CONFIG_HOME/plan-complete/config.json`):
 
@@ -50,6 +50,12 @@ ln -s "$PWD/.build/release/plan-complete" /usr/local/bin/plan-complete
 ```
 
 With a llama-server on `127.0.0.1:8012` you can skip this file: those are the defaults.
+
+Then, in each repository where you want completions:
+
+```sh
+echo '{}' > .plan-complete.json   # opt in; the plan is PLAN.md
+```
 
 ### 3a. VS Code
 
@@ -77,6 +83,10 @@ not see your shell's `PATH`, so a full path is safer). After a change, run *Plan
 Turn off other inline-completion extensions (Copilot and others) for the workspace while you test, or
 VS Code may show theirs. `Option+\` (`Alt+\`) asks for a suggestion by hand. `Tab` accepts.
 
+The status bar shows `Plan: on` or `Plan: off`, with the reason in its tooltip (`no .plan-complete.json`,
+`no PLAN.md`, `turned off`). Click it, or run *Plan Complete: Toggle for This Workspace*, to turn it
+off or on for this workspace; VS Code remembers the choice.
+
 ### 3b. Neovim (0.12+)
 
 ```lua
@@ -88,7 +98,9 @@ require("plan_complete").setup({
 })
 ```
 
-`Tab` accepts, `M-]` and `M-[` cycle. See `editors/nvim/README.md`.
+`Tab` accepts, `M-]` and `M-[` cycle. `:PlanCompleteToggle` turns it off or on for the session,
+`:PlanCompleteStatus` shows the state, and `require("plan_complete").statusline()` gives `Plan: on` or
+`Plan: off (reason)` for your statusline. See `editors/nvim/README.md`.
 
 ### 4. Check it with no editor
 
@@ -100,7 +112,8 @@ plan-complete probe Sources/Foo.swift:42:9 --no-guide # compare without the plan
 ```
 
 `probe` prints `context: PLAN.md#<heading>` for the sections that it used.
-
+When the repository is not opted in, `probe` prints `off: <reason>` and exits with 3. `--no-guide` runs
+anyway, with no plan, to compare.
 ## Settings
 
 Three layers. Each one sets only the fields that it names:
@@ -109,9 +122,10 @@ Three layers. Each one sets only the fields that it names:
 2. `<repo>/.plan-complete.json`: one repository, for example another plan location.
 3. Editor overrides: VS Code `planComplete.settings`, Neovim `setup({ settings = … })`.
 
-`.plan-complete.json` is the server's file, not a VS Code settings file. The VS Code settings are only
-`planComplete.serverPath` (where the binary is), `planComplete.settings` (the overrides), and
-`planComplete.passSignatureHelp` (send the real language server's signature help at the cursor).
+`.plan-complete.json` is the server's file, not a VS Code settings file, and its presence opts the
+repository in. The VS Code settings are only `planComplete.serverPath` (where the binary is),
+`planComplete.settings` (the overrides), and `planComplete.passSignatureHelp` (send the real language
+server's signature help at the cursor).
 
 | Field | Default | Meaning |
 |---|---|---|
@@ -119,7 +133,7 @@ Three layers. Each one sets only the fields that it names:
 | `provider` | `llama-infill` | `llama-infill` (`/infill`, server builds the prompt) or `openai-fim` (`/v1/completions`) |
 | `model` | `default` | Model name sent with each request (a proxy such as llama-swap uses it to pick the model) |
 | `apiKey` | none | Sent as `Authorization: Bearer` |
-| `guide` | `PLAN.md` | The plan: one Markdown file, or a folder whose `.md` files are all read |
+| `guide` | `PLAN.md` | The plan: one Markdown file, or a folder whose `.md` files are all read. Repo file only |
 | `guideTokenBudget` | `1200` | Most plan tokens in one prompt |
 | `maxTokens` / `maxLines` | `64` / `12` | Size of one completion |
 | `prefixLines` / `suffixLines` | `80` / `40` | Lines of code before and after the cursor |
@@ -130,10 +144,21 @@ Three layers. Each one sets only the fields that it names:
 
 ### Where it comes from
 
-1. The editor starts `plan-complete serve` with the opened folder as the project root.
-2. The server reads `PLAN.md` there, or the file or folder named by `guide`.
-3. It checks the file times at most once a second. The next suggestion after a save uses the new text,
-   with no restart.
+The server runs only in a repository that opts in:
+
+1. `<repo>/.plan-complete.json` exists. `{}` is enough. With no file the server stays quiet.
+2. The plan exists: `PLAN.md` at the repository root, or the file or folder that `guide` in
+   `.plan-complete.json` names. A folder needs at least one `.md` file. With no plan the server stays quiet.
+3. The workspace toggle is on (VS Code: click the status bar item; Neovim: `:PlanCompleteToggle`).
+
+Quiet means every completion request returns at once, with no model call. The editor still starts the
+server, so a plan written later turns it on within a second, with no restart.
+
+Only `.plan-complete.json` in the repository can name the plan. `guide` in the global file or in the
+editor settings is ignored, and a `guide` outside the repository (absolute, `~`, or `..`) falls back to
+`PLAN.md`.
+
+The server rereads the plan at most once a second, so the next suggestion after a save uses the new text.
 
 The editor stores nothing: the plan is a plain file in your repository. Whatever writes it steers the
 completions: you, Claude, or another agent.
@@ -201,7 +226,9 @@ priority: 1
 | Symptom | Fix |
 |---|---|
 | `spawn plan-complete ENOENT` | Set `planComplete.serverPath` to the full path, then *Restart Server* |
-| No ghost text | `Option+\`; check *View → Output → Plan Complete*; turn off other completion extensions |
+| `Plan: off (no .plan-complete.json)` | `echo '{}' > .plan-complete.json` at the repository root |
+| `Plan: off (no PLAN.md)` | Write `PLAN.md`, or name the plan with `guide` in `.plan-complete.json` |
+| No ghost text | Check the status bar; `Option+\`; *View → Output → Plan Complete*; turn off other completion extensions |
 | `Could not connect to the server` | Nothing at `baseURL`: start llama-server, or set `baseURL` in the global config |
 | Slow first suggestion | The model server is loading the model |
 | Odd suggestion | `plan-complete probe FILE:LINE:COL --prompt` shows what the model saw |
@@ -210,7 +237,7 @@ priority: 1
 
 ## Try it on the sample
 
-`examples/sample` has a Swift file, a Python file, and a `PLAN.md`. With a model server running:
+`examples/sample` has a Swift file, a Python file, a `PLAN.md`, and a `.plan-complete.json`. With a model server running:
 
 ```sh
 cd examples/sample

@@ -33,6 +33,7 @@ final class RecordingProvider: CompletionProvider, @unchecked Sendable {
         ## Cache
         ResponseCache is an actor.
         """.write(to: guide.appendingPathComponent("cache.md"), atomically: true, encoding: .utf8)
+        try "{}".write(to: root.appendingPathComponent(".plan-complete.json"), atomically: true, encoding: .utf8)
         return root
     }
 
@@ -107,6 +108,7 @@ final class RecordingProvider: CompletionProvider, @unchecked Sendable {
 
     @Test func plainPlanIsTheDefault() async throws {
         let root = try makeRoot([
+            ".plan-complete.json": "{}",
             "PLAN.md": """
             # Cache work
 
@@ -130,7 +132,7 @@ final class RecordingProvider: CompletionProvider, @unchecked Sendable {
     }
 
     @Test func guideFolder() async throws {
-        let root = try makeRoot(["notes/a.md": "## A\nalpha", "notes/sub/b.md": "## B\nbeta"])
+        let root = try makeRoot([".plan-complete.json": "{}", "notes/a.md": "## A\nalpha", "notes/sub/b.md": "## B\nbeta"])
         var config = Config()
         config.guide = "notes"
         let engine = Engine(root: root, config: config, provider: RecordingProvider(reply: ""))
@@ -153,5 +155,84 @@ final class RecordingProvider: CompletionProvider, @unchecked Sendable {
                                text: "Sources/A.swift " + String(repeating: "word ", count: 2000))
         let picked = GuideSelector(budget: 100).select(chunks: [chunk], path: "Sources/A.swift", window: "")
         #expect(picked.first?.text.count == 400)
+    }
+}
+
+@Suite struct PlanRuleTests {
+    func makeRoot(_ files: [String: String]) throws -> URL {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent("pc-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        for (path, text) in files {
+            let url = root.appendingPathComponent(path)
+            try FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
+            try text.write(to: url, atomically: true, encoding: .utf8)
+        }
+        return root
+    }
+
+    func load(_ root: URL, global: String? = nil) throws -> Config {
+        var globalFile: URL?
+        if let global {
+            globalFile = root.appendingPathComponent("global.json")
+            try global.write(to: globalFile!, atomically: true, encoding: .utf8)
+        }
+        return try Config.load(root: root, globalFile: globalFile)
+    }
+
+    @Test func emptyRepoFileMeansPlanFileOnly() throws {
+        let root = try makeRoot([".plan-complete.json": "{}"])
+        #expect(try load(root).guide == "PLAN.md")
+        #expect(try load(root, global: "{}").guide == "PLAN.md")
+    }
+
+    @Test func onlyTheRepoFileNamesThePlan() throws {
+        let root = try makeRoot([".plan-complete.json": #"{"model": "x"}"#])
+        #expect(try load(root, global: #"{"guide": "docs"}"#).guide == "PLAN.md")
+        let editor = try load(root).applyingEditor(["guide": "docs", "maxTokens": 9])
+        #expect(editor.guide == "PLAN.md")
+        #expect(editor.maxTokens == 9)
+        let named = try makeRoot([".plan-complete.json": #"{"guide": "docs/plan"}"#])
+        #expect(try load(named).guide == "docs/plan")
+    }
+
+    @Test func unsafeGuideFallsBack() {
+        for bad in ["/etc", "../other", "a/../../b", "~/x", "", "  "] {
+            #expect(Config.safeGuide(bad) == "PLAN.md", "\(bad)")
+        }
+        #expect(Config.safeGuide("docs/plan") == "docs/plan")
+    }
+
+    @Test func states() throws {
+        #expect(PlanState.check(root: try makeRoot(["PLAN.md": "x"]), guide: "PLAN.md") == .noConfig)
+        #expect(PlanState.check(root: try makeRoot([".plan-complete.json": "{}"]), guide: "PLAN.md") == .noPlan(guide: "PLAN.md"))
+        let on = try makeRoot([".plan-complete.json": "{}", "PLAN.md": "x"])
+        #expect(PlanState.check(root: on, guide: "PLAN.md") == .on(guide: "PLAN.md"))
+        #expect(PlanState.check(root: on, guide: "PLAN.md", enabled: false) == .disabled)
+        let emptyFolder = try makeRoot([".plan-complete.json": "{}", "docs/plan/readme.txt": "x"])
+        #expect(PlanState.check(root: emptyFolder, guide: "docs/plan") == .noPlan(guide: "docs/plan"))
+        let folder = try makeRoot([".plan-complete.json": "{}", "docs/plan/a.md": "x"])
+        #expect(PlanState.check(root: folder, guide: "docs/plan") == .on(guide: "docs/plan"))
+    }
+
+    @Test func offReturnsEarlyWithNoModelCall() async throws {
+        let root = try makeRoot(["PLAN.md": "## Step\nx"])
+        let provider = RecordingProvider(reply: "never")
+        let engine = Engine(root: root, config: Config(), provider: provider)
+        let doc = TextDocument(path: root.appendingPathComponent("a.swift").path, text: "let a = ")
+        #expect(try await engine.complete(document: doc, line: 0, utf16Column: 8).text == "")
+        #expect(provider.requests.isEmpty)
+        await engine.setBypassPlanRule(true)
+        #expect(try await engine.complete(document: doc, line: 0, utf16Column: 8).text == "never")
+    }
+
+    @Test func toggleOff() async throws {
+        let root = try makeRoot([".plan-complete.json": "{}", "PLAN.md": "## Step\nx"])
+        let provider = RecordingProvider(reply: "y")
+        let engine = Engine(root: root, config: Config(), provider: provider)
+        await engine.setEnabled(false)
+        let doc = TextDocument(path: root.appendingPathComponent("a.swift").path, text: "let a = ")
+        #expect(try await engine.complete(document: doc, line: 0, utf16Column: 8).text == "")
+        await engine.setEnabled(true)
+        #expect(try await engine.complete(document: doc, line: 0, utf16Column: 8).text == "y")
     }
 }

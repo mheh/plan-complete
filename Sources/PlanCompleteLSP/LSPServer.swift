@@ -13,6 +13,8 @@ public actor LSPServer {
     private var pending: [String: (id: JSONValue, task: Task<Void, Never>)] = [:]
     private var tasksByID: [JSONValue: Task<Void, Never>] = [:]
     private var shutdownRequested = false
+    private var enabled = true
+    private var lastState: PlanState?
     public private(set) var exitCode: Int32?
 
     public init(send: @escaping Send,
@@ -30,8 +32,18 @@ public actor LSPServer {
         case "initialize":
             await initialize(params)
             await reply(id, result: capabilities())
-        case "initialized", "$/setTrace", "workspace/didChangeWatchedFiles":
+        case "initialized":
+            await publishState(force: true)
+        case "$/setTrace", "workspace/didChangeWatchedFiles":
             break
+        case "planComplete/setEnabled":
+            enabled = params["enabled"]?.boolValue ?? true
+            await engine?.setEnabled(enabled)
+            await publishState(force: true)
+            await reply(id, result: ["state": stateJSON(lastState)])
+        case "planComplete/status":
+            await publishState(force: false)
+            await reply(id, result: stateJSON(lastState))
         case "shutdown":
             shutdownRequested = true
             cancelAll()
@@ -43,8 +55,10 @@ public actor LSPServer {
             if let uri = doc?["uri"]?.stringValue, let text = doc?["text"]?.stringValue {
                 documents[uri] = TextDocument(path: Self.path(of: uri), text: text)
             }
+            await publishState(force: false)
         case "textDocument/didChange":
             didChange(params)
+            await publishState(force: false)
         case "textDocument/didClose":
             if let uri = params["textDocument"]?["uri"]?.stringValue {
                 documents[uri] = nil
@@ -55,8 +69,11 @@ public actor LSPServer {
                 initOptions = settings
                 await reloadConfig()
             }
+        case "textDocument/didSave":
+            await publishState(force: false)
         case "textDocument/inlineCompletion":
             guard let id else { return }
+            await publishState(force: false)
             inlineCompletion(id: id, params: params)
         case "$/cancelRequest":
             if let target = params["id"], let task = tasksByID[target] { task.cancel() }
@@ -68,7 +85,7 @@ public actor LSPServer {
     private func capabilities() -> JSONValue {
         [
             "capabilities": [
-                "textDocumentSync": ["openClose": true, "change": 2],
+                "textDocumentSync": ["openClose": true, "change": 2, "save": .object([:])],
                 "inlineCompletionProvider": .object([:]),
             ],
             "serverInfo": ["name": "plan-complete", "version": "0.1.0"],
@@ -89,11 +106,30 @@ public actor LSPServer {
     private func reloadConfig() async {
         var config = Config()
         do {
-            config = try Config.load(root: root).merged(with: initOptions)
+            config = try Config.load(root: root).applyingEditor(initOptions)
         } catch {
             log("config: \(error)")
         }
-        engine = makeEngine(root, config)
+        let engine = makeEngine(root, config)
+        await engine.setEnabled(enabled)
+        self.engine = engine
+        await publishState(force: true)
+    }
+
+    /// Sends `planComplete/status` when the state changed, or always with `force`.
+    private func publishState(force: Bool) async {
+        guard let engine else { return }
+        let state = await engine.state()
+        guard force || state != lastState else { return }
+        let changed = state != lastState
+        lastState = state
+        if changed { trace("plan: \(state.isOn ? "on" : "off") (\(state.reason))") }
+        await send(["jsonrpc": "2.0", "method": "planComplete/status", "params": stateJSON(state)])
+    }
+
+    private func stateJSON(_ state: PlanState?) -> JSONValue {
+        guard let state else { return ["active": false, "reason": "starting"] }
+        return ["active": .bool(state.isOn), "reason": .string(state.reason)]
     }
 
     private func didChange(_ params: JSONValue) {

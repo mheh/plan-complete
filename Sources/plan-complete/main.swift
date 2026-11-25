@@ -7,7 +7,7 @@ usage:
   plan-complete serve                       LSP over stdio
   plan-complete probe FILE:LINE:COL [opts]  one completion; LINE and COL are 1-based
     --root DIR       workspace root (default: nearest parent with .plan-complete.json or .git)
-    --no-guide       leave the guide out
+    --no-guide       leave the plan out, and run even when the plan rule is off
     --no-scope       leave the scope summary out
     --prompt         print the request instead of calling the model
     --raw            also print the raw model text
@@ -16,7 +16,7 @@ usage:
 func findRoot(from start: URL) -> URL {
     var dir = start.hasDirectoryPath ? start : start.deletingLastPathComponent()
     while dir.path != "/" {
-        for marker in [Config.fileName, "PLAN.md", ".git"] where FileManager.default.fileExists(atPath: dir.appendingPathComponent(marker).path) {
+        for marker in [Config.fileName, Config.defaultGuide, ".git"] where FileManager.default.fileExists(atPath: dir.appendingPathComponent(marker).path) {
             return dir
         }
         dir.deleteLastPathComponent()
@@ -44,6 +44,12 @@ func probe(_ args: [String]) async -> Int32 {
         let lineText = text.components(separatedBy: "\n").dropFirst(line - 1).first ?? ""
         let utf16Column = String(lineText.prefix(max(0, column - 1))).utf16.count
         let engine = Engine(root: root, config: config)
+        let state = await engine.state()
+        if args.contains("--no-guide") { await engine.setBypassPlanRule(true) }
+        else if !state.isOn {
+            FileHandle.standardError.write(Data("off: \(state.reason) in \(root.path)\n".utf8))
+            return 3
+        }
         if args.contains("--prompt") {
             let prepared = await engine.prepare(document: document, line: line - 1, utf16Column: utf16Column)
             print(OpenAIFIMProvider.prompt(for: prepared.request))

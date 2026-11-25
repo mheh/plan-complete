@@ -7,8 +7,8 @@ Editors show the result as ghost text through `textDocument/inlineCompletion`.
 
 ## STATUS
 
-- Done: Phases 0–4 (scaffold, core and probe, LSP server, Neovim, VS Code). 40 tests pass
-  (34 core, 6 LSP). Each editor has an end-to-end check that triggers, accepts, and reads the buffer.
+- Done: Phases 0–4 (scaffold, core and probe, LSP server, Neovim, VS Code). 47 tests pass
+  (40 core, 7 LSP). Each editor has an end-to-end check that triggers, accepts, and reads the buffer.
 - Done after Phase 4, from a trial in a large Swift project:
   - Comment lines: no restated typed text, no double space, one line only, a two-line suffix, and one
     retry with no suffix when the first answer is empty (the model often ends a started comment at once).
@@ -17,7 +17,12 @@ Editors show the result as ghost text through `textDocument/inlineCompletion`.
   - `probe --raw` prints the raw model text.
 - Done: the plan is a plain `PLAN.md` at the root by default (`guide` names a file or a folder); settings are
   global (`~/.config/plan-complete/config.json`), then the repo `.plan-complete.json`, then the editor.
+- Done: the opt-in rule. The server answers only with `<repo>/.plan-complete.json`, its plan, and the toggle
+  on; otherwise it returns at once. It sends `planComplete/status` `{active, reason}`; VS Code shows it in the
+  status bar and toggles per workspace; Neovim has `:PlanCompleteToggle`, `:PlanCompleteStatus`, `statusline()`.
 - Next, open:
+  0. Discuss: context from the real language server (enclosing symbol path, hover of the receiver, the
+     declaration of the called name in another file), sent as `extraContext`, and plan sections matched by symbol.
   1. Compare guide selection with the llama.vim way (the guide open in a buffer, recent chunks in `input_extra`).
   2. Phase 5, Xcode: choose between the two options below.
   3. Release: GitHub Actions that attach the `.vsix` and a macOS binary to a tag; the extension finds or
@@ -63,6 +68,11 @@ On a 9B Qwen-format coder model on one consumer GPU (llama-server, about 100 tok
   Front-matter (`files:`, `symbols:`, `priority:`) is optional. `guide` names another file or a folder.
 - **Settings in layers:** built-in defaults, the global file, the repo `.plan-complete.json`, the editor overrides.
   Each layer sets only the fields it names. The model server goes in the global file.
+- **Opt in, quiet otherwise.** No `.plan-complete.json` at the repository root, or no plan, or the toggle off:
+  the server returns every completion at once, with no model call. The editors always start it, so a plan
+  written later turns it on within a second. Only the repo file can name the plan (`guide`); the global file and
+  the editors cannot, and a path outside the repository falls back to `PLAN.md`. An empty `{}` means `PLAN.md`.
+  `probe` follows the rule and prints the reason; `probe --no-guide` skips it.
 - **Cursor context.** `ScopeContext` finds the enclosing block headers by indentation and the open call at the
   cursor (`self.init(` → `init`), and lists the declarations of that name in the file. It goes into the prompt as
   an extra file `<path>.scope`. A client can send richer context from the real language server in
@@ -70,8 +80,8 @@ On a 9B Qwen-format coder model on one consumer GPU (llama-server, about 100 tok
   When the cursor is in an open call, the completion ends where that call closes.
 - **Cleanup is text only:** FIM tokens, text that repeats the rest of the line or the next line, lines that leave
   the cursor's block, repeated typed words, comment-line rules above.
-- **Defaults point at a local llama-server** (`http://127.0.0.1:8012`). A repo `.plan-complete.json` is optional
-  and git ignores it here.
+- **Defaults point at a local llama-server** (`http://127.0.0.1:8012`). The model server goes in the global file.
+  This repository opts in with a root `.plan-complete.json`, which git ignores here.
 - **Minimal code comments.** Only where the code cannot say it.
 
 ## Existing tools, and why we still build this
@@ -112,8 +122,8 @@ LSP `initializationOptions` (VS Code `planComplete.settings`, Neovim `settings`)
 
 ```
 Package.swift
-Sources/PlanCompleteCore/    Config, JSONValue, Guide, Glob, GuideSelector, TextDocument, ScopeContext,
-                             Providers, Postprocess, Engine
+Sources/PlanCompleteCore/    Config, JSONValue, PlanState, Guide, Glob, GuideSelector, TextDocument,
+                             ScopeContext, Providers, Postprocess, Engine
 Sources/PlanCompleteLSP/     Framing (Content-Length), LSPServer
 Sources/plan-complete/       main: `serve` (stdio LSP), `probe FILE:LINE:COL`
 Tests/PlanCompleteCoreTests/ guide, selection, text, scope, cleanup, engine
@@ -141,8 +151,8 @@ reload, LRU cache, typeahead reuse of an earlier completion); `probe`.
 ### Phase 2 — LSP server (done)
 Content-Length framing over stdio; `initialize` (incremental sync, `inlineCompletionProvider`),
 `didOpen`/`didChange`/`didClose`, `didChangeConfiguration`, `textDocument/inlineCompletion` (with
-`selectedCompletionInfo` and `extraContext`), `$/cancelRequest`, `shutdown`, `exit`. A newer request for the
-same document cancels the older one. `PLAN_COMPLETE_LOG` writes a trace.
+`selectedCompletionInfo` and `extraContext`), `$/cancelRequest`, `shutdown`, `exit`, and `planComplete/setEnabled` and `planComplete/status`. A newer request for
+the same document cancels the older one. `PLAN_COMPLETE_LOG` writes a trace.
 
 ### Phase 3 — Neovim (done)
 `editors/nvim/lua/plan_complete.lua`: starts the server for every file type (or a list), enables

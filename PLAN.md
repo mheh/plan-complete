@@ -7,8 +7,7 @@ Editors show the result as ghost text through `textDocument/inlineCompletion`.
 
 ## STATUS
 
-- Done: Phases 0–4 (scaffold, core and probe, LSP server, Neovim, VS Code). 49 tests pass
-  (40 core, 7 LSP). Each editor has an end-to-end check that triggers, accepts, and reads the buffer.
+- Done: Phases 0–4 (scaffold, core and probe, LSP server, Neovim, VS Code). Each editor has an end-to-end check that triggers, accepts, and reads the buffer.
 - Done after Phase 4, from a trial in a large Swift project:
   - Comment lines: no restated typed text, no double space, one line only, a two-line suffix, and one
     retry with no suffix when the first answer is empty (the model often ends a started comment at once).
@@ -24,13 +23,28 @@ Editors show the result as ghost text through `textDocument/inlineCompletion`.
   trip works. Windows paths are handled (`C:\` roots, `file:///c%3A/...`, `%APPDATA%`), and CI is its first test.
 - Done: CI (`.github/workflows/ci.yml`): Linux 6.2 and 6.4, macOS, Windows, and the VS Code extension. Actions are
   pinned to commits. The `.build` cache is saved on master only; branches and pull requests restore it.
+- Done: version 0.2.0, "usable from a default install". 65 tests pass (54 core, 11 LSP) on macOS and on Linux
+  in Docker (Swift 6.2 and 6.4).
+  - Settings: nested `context` and `scoring`; layers merge field by field; the files allow comments and
+    trailing commas; saving a settings file in the editor reloads it.
+  - Setup: `Setup.enable` writes a commented `.plan-complete.json` and a starter `PLAN.md` (text in HTML
+    comments is not read). CLI `enable`, `config`, `--version`. LSP `planComplete/enable`, `planComplete/files`.
+  - Status carries `problem` (model server down, bad settings) and `context` (what the editor gathers).
+  - VS Code: the binary is inside the extension; the status bar opens a menu; a JSON schema covers the
+    settings files. Neovim: `:PlanCompleteEnable`. Both checked end to end.
+  - Release: CI builds a universal macOS binary, static Linux binaries (musl SDK, 58 MB) and a static Windows
+    binary, packages one `.vsix` for each VS Code target with `scripts/package.sh`, and on a `v*` tag makes
+    the GitHub release. The Windows binary and the release job have not run yet.
 - Next, open:
-  0. Discuss: context from the real language server (enclosing symbol path, hover of the receiver, the
-     declaration of the called name in another file), sent as `extraContext`, and plan sections matched by symbol.
+  0. The symbol path: `context.symbols` (default on). The VS Code client caches `textDocument/documentSymbol`
+     for each file and sends the enclosing path (`ResponseCache > init()`) as `extraContext`. The server scores
+     a section that names the enclosing type +8 and the member +4 (`scoring.type`, `scoring.member`), and
+     ignores generic names (`init`, `body`, `description`, under four characters). Compare with and without it
+     on `examples/sample`, then decide on the receiver type from hover (`context.hover`, 100 ms limit) and on the
+     declaration of the called name (`context.definition`). Neovim after the format settles.
   1. Compare guide selection with the llama.vim way (the guide open in a buffer, recent chunks in `input_extra`).
   2. Phase 5, Xcode: choose between the two options below.
-  3. Release: GitHub Actions that attach the `.vsix` and a macOS binary to a tag; the extension finds or
-     downloads the binary itself.
+  3. Tag `v0.2.0` after CI is green, and check the Windows `.vsix` on a Windows machine.
 - Restart from here: read this block, then the item marked next.
 
 ## Measured
@@ -87,6 +101,10 @@ On a 9B Qwen-format coder model on one consumer GPU (llama-server, about 100 tok
 - **Defaults point at a local llama-server** (`http://127.0.0.1:8012`). The model server goes in the global file.
   This repository opts in with a root `.plan-complete.json`, which git ignores here.
 - **Minimal code comments.** Only where the code cannot say it.
+- **Actors, no locks.** Shared state lives in an actor (`Engine`, `LSPServer`, the test doubles). No mutex, no
+  `@unchecked Sendable`.
+- **Usable from a default install, and every feature has a setting.** A new feature gets a field with a good
+  default in `Config`, the template, the schema and the README table.
 
 ## Existing tools, and why we still build this
 
@@ -113,28 +131,40 @@ The server rereads the plan at most once a second.
 
 ## Config: `~/.config/plan-complete/config.json`, then `<root>/.plan-complete.json` (all fields optional)
 
-```json
+```jsonc
 { "baseURL": "http://127.0.0.1:8012", "provider": "llama-infill", "model": "default", "apiKey": null,
   "guide": "PLAN.md", "guideTokenBudget": 1200, "maxTokens": 64, "maxLines": 12,
   "prefixLines": 80, "suffixLines": 40, "timeoutMs": 4000, "debounceMs": 60,
-  "useGuide": true, "useScope": true }
+  "useGuide": true, "useScope": true,
+  "context": { "signature": true, "timeoutMs": 100, "tokenBudget": 300 },
+  // Subject to change between versions.
+  "scoring": { "glob": 10, "file": 8, "symbol": 4, "codeSpan": 2, "heading": 2, "words": 3 } }
 ```
 
 LSP `initializationOptions` (VS Code `planComplete.settings`, Neovim `settings`) override both files.
+The server owns the settings: it sends `context` to the editor with each status, so one file configures every
+editor. `Config`, the template that `enable` writes, the VS Code schema and the README table list the same
+fields; tests check the first three against each other.
 
 ## Layout
 
 ```
 Package.swift
-Sources/PlanCompleteCore/    Config, JSONValue, PlanState, Guide, Glob, GuideSelector, TextDocument,
-                             ScopeContext, Providers, Postprocess, Engine
-Sources/PlanCompleteLSP/     Framing (Content-Length), LSPServer
-Sources/plan-complete/       main: `serve` (stdio LSP), `probe FILE:LINE:COL`
-Tests/PlanCompleteCoreTests/ guide, selection, text, scope, cleanup, engine
+Sources/PlanCompleteCore/
+  Engine.swift               one completion: plan state, prompt, model call, cleanup, cache
+  Config/                    Config (fields, layers), Setup (enable, the file templates)
+  Plan/                      Guide (Markdown to chunks), GuideSelector (scoring), Glob, PlanState (the opt-in rule)
+  Text/                      TextDocument, ScopeContext, Postprocess
+  Model/                     CompletionProvider, LlamaInfillProvider, OpenAIFIMProvider, JSONPoster, ModelFailure
+  Support/                   JSONValue, JSONC, LRUCache, RelativePath, Version
+Sources/PlanCompleteLSP/     LSPServer (state and dispatch), InlineCompletion, Wire (replies, log, ranges),
+                             Framing (Content-Length), Stdio, FileURI
+Sources/plan-complete/       main (usage and dispatch), Commands (`enable`, `config`), Probe, Root
+Tests/PlanCompleteCoreTests/ one file for each subject; Support.swift has the shared helpers
 Tests/PlanCompleteLSPTests/  server in process, framing
 editors/nvim/lua/plan_complete.lua
-editors/vscode/              client extension, test/run.js (end-to-end)
-scripts/                     lsp-smoke.mjs, nvim-smoke.lua
+editors/vscode/              src/{extension,server,status,context}.ts, schemas/, test/run.js (end-to-end)
+scripts/                     lsp-smoke.mjs, nvim-smoke.lua, package.sh (the .vsix files and archives)
 examples/sample/             Swift and Python files with a plain PLAN.md
 ```
 

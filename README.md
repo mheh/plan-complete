@@ -16,130 +16,156 @@ PLAN.md  ──▶  plan-complete serve  ──▶  llama-server /infill (or any
                textDocument/inlineCompletion
 ```
 
-## Requirements
+## Quick start
 
-- Swift 6 on macOS 14 or later, Linux, or Windows. CI builds and tests all three (Swift 6.2 and 6.4).
-- A fill-in-the-middle model behind an HTTP server:
-  - `llama-server` (llama.cpp) with a coder model that has FIM tokens. Qwen2.5-Coder, Qwen3-Coder and
-    similar models work. For example:
-    `llama-server -hf ggml-org/Qwen2.5-Coder-1.5B-Q8_0-GGUF --port 8012`
-  - Or any OpenAI-style `/v1/completions` server with the `openai-fim` provider (Qwen prompt format).
-- VS Code 1.91 or later, or Neovim 0.12 or later.
+1. **A model server.** Any fill-in-the-middle model behind `llama-server` (llama.cpp) works: Qwen2.5-Coder,
+   Qwen3-Coder and similar. The defaults expect it on port 8012:
+
+   ```sh
+   llama-server -hf ggml-org/Qwen2.5-Coder-1.5B-Q8_0-GGUF --port 8012
+   ```
+
+2. **The editor.**
+   - VS Code: download `plan-complete-<platform>.vsix` from the
+     [Releases](https://github.com/mheh/plan-complete/releases) page and run
+     `code --install-extension plan-complete-<platform>.vsix`. The server is inside the extension.
+   - Neovim: see [Neovim](#neovim-012-or-later) below.
+
+3. **Opt a repository in.** Open it, click `Plan: off` in the status bar, and pick *Enable in this workspace*
+   (Neovim: `:PlanCompleteEnable`; a terminal: `plan-complete enable`). This writes `.plan-complete.json` and a
+   starter `PLAN.md`, and opens the plan.
+
+Write a step into `PLAN.md`, open the file that it names, and type.
+
+Nothing else needs a setting. The rest of this page is for when you want to change something.
 
 ## Install
 
-### 1. Build the server
+### VS Code (1.91 or later)
+
+The `.vsix` of your platform holds the server binary: `darwin-arm64`, `darwin-x64`, `linux-x64`, `linux-arm64`,
+`alpine-x64`, `alpine-arm64`, `win32-x64`. The plain `plan-complete.vsix` has no binary, for any other platform.
+
+The extension looks for the server in this order:
+
+1. the `planComplete.serverPath` setting,
+2. the binary inside the extension,
+3. `plan-complete` on `PATH`.
+
+The status bar item shows the state, and a click opens the menu:
+
+| Status bar | Meaning |
+|---|---|
+| `Plan: on` | Completions follow the plan. The tooltip names it. |
+| `Plan: no model` | The repository is on, but the last request to the model server failed. The tooltip says why. |
+| `Plan: off` | The tooltip gives the reason: `no .plan-complete.json`, `no PLAN.md`, `turned off`. |
+
+The menu and the command palette (*Plan Complete: …*) have: *Enable in This Workspace*, *Toggle for This
+Workspace*, *Open the Plan*, *Open the Repository Settings*, *Open the Global Settings*, *Restart Server*.
+VS Code remembers the toggle for each workspace.
+
+Turn off other inline-completion extensions (Copilot and others) for the workspace, or VS Code may show
+theirs. `Option+\` (`Alt+\`) asks for a suggestion by hand. `Tab` accepts.
+
+### Neovim (0.12 or later)
+
+Get the binary from the Releases page (`plan-complete-<platform>.tar.gz`), or build it, and put it on `PATH`.
+
+```lua
+vim.opt.rtp:append("/full/path/to/plan-complete/editors/nvim")
+require("plan_complete").setup({
+  -- cmd = { "/full/path/to/plan-complete", "serve" },   -- default: plan-complete on PATH
+  -- filetypes = { "swift", "python" },                  -- default: every file type
+  -- settings = { model = "qwen2.5-coder" },             -- overrides the settings files
+})
+```
+
+`Tab` accepts, `M-]` and `M-[` cycle. `:PlanCompleteEnable` opts the project in, `:PlanCompleteToggle` turns
+it off or on for the session, `:PlanCompleteStatus` shows the state, and
+`require("plan_complete").statusline()` gives `Plan: on`, `Plan: no model` or `Plan: off (reason)`.
+See `editors/nvim/README.md`.
+
+### Build from source
+
+Swift 6 on macOS 14 or later, Linux, or Windows. CI builds and tests all three (Swift 6.2 and 6.4).
 
 ```sh
 git clone https://github.com/mheh/plan-complete.git
 cd plan-complete
 swift build -c release
-# optional: put it on PATH
 ln -s "$PWD/.build/release/plan-complete" /usr/local/bin/plan-complete
+
+cd editors/vscode && npm install && npm run package   # a .vsix with no binary
 ```
 
-### 2. Point it at your model, once, and opt a repository in
-
-`~/.config/plan-complete/config.json` (or `$XDG_CONFIG_HOME/plan-complete/config.json`;
-on Windows, `%APPDATA%\plan-complete\config.json`):
-
-```json
-{
-  "baseURL": "http://127.0.0.1:8012",
-  "model": "qwen2.5-coder-1.5b"
-}
-```
-
-With a llama-server on `127.0.0.1:8012` you can skip this file: those are the defaults.
-
-Then, in each repository where you want completions:
+### The command line
 
 ```sh
-echo '{}' > .plan-complete.json   # opt in; the plan is PLAN.md
+plan-complete enable [DIR]     # opt a repository in
+plan-complete config [DIR]     # the settings in effect, and the files they come from
+plan-complete probe Sources/Foo.swift:42:9             # one completion; LINE and COL are 1-based
+plan-complete probe Sources/Foo.swift:42:9 --prompt    # print the exact prompt
+plan-complete probe Sources/Foo.swift:42:9 --no-guide  # compare without the plan
 ```
 
-### 3a. VS Code
+`probe` prints `context: PLAN.md#<heading>` for the sections that it used. When the repository is not opted
+in, `probe` prints `off: <reason>` and exits with 3. `--no-guide` runs anyway, with no plan.
 
-Download `plan-complete-<version>.vsix` from the GitHub Releases page, or build it:
-
-```sh
-cd editors/vscode && npm install && npm run package
-```
-
-Then:
-
-```sh
-code --install-extension plan-complete-0.1.0.vsix
-```
-
-In your user settings (`Cmd+Shift+P` → *Preferences: Open User Settings (JSON)*):
-
-```json
-"planComplete.serverPath": "/full/path/to/plan-complete/.build/release/plan-complete"
-```
-
-`serverPath` can stay `plan-complete` when the binary is on `PATH` (VS Code started from the Dock may
-not see your shell's `PATH`, so a full path is safer). After a change, run *Plan Complete: Restart Server*.
-
-Turn off other inline-completion extensions (Copilot and others) for the workspace while you test, or
-VS Code may show theirs. `Option+\` (`Alt+\`) asks for a suggestion by hand. `Tab` accepts.
-
-The status bar shows `Plan: on` or `Plan: off`, with the reason in its tooltip (`no .plan-complete.json`,
-`no PLAN.md`, `turned off`). Click it, or run *Plan Complete: Toggle for This Workspace*, to turn it
-off or on for this workspace; VS Code remembers the choice.
-
-### 3b. Neovim (0.12+)
-
-```lua
-vim.opt.rtp:append("/full/path/to/plan-complete/editors/nvim")
-require("plan_complete").setup({
-  cmd = { "/full/path/to/plan-complete/.build/release/plan-complete", "serve" },
-  -- filetypes = { "swift", "python" },        -- default: every file type
-  -- settings = { model = "qwen2.5-coder" },   -- overrides the config files
-})
-```
-
-`Tab` accepts, `M-]` and `M-[` cycle. `:PlanCompleteToggle` turns it off or on for the session,
-`:PlanCompleteStatus` shows the state, and `require("plan_complete").statusline()` gives `Plan: on` or
-`Plan: off (reason)` for your statusline. See `editors/nvim/README.md`.
-
-### 4. Check it with no editor
-
-```sh
-cd your-project
-plan-complete probe Sources/Foo.swift:42:9            # LINE and COL are 1-based
-plan-complete probe Sources/Foo.swift:42:9 --prompt   # print the exact prompt
-plan-complete probe Sources/Foo.swift:42:9 --no-guide # compare without the plan
-```
-
-`probe` prints `context: PLAN.md#<heading>` for the sections that it used.
-When the repository is not opted in, `probe` prints `off: <reason>` and exits with 3. `--no-guide` runs
-anyway, with no plan, to compare.
 ## Settings
 
-Three layers. Each one sets only the fields that it names:
+Three layers. Each one sets only the fields that it names, and the later one wins:
 
-1. `~/.config/plan-complete/config.json`: global, for your model server.
-2. `<repo>/.plan-complete.json`: one repository, for example another plan location.
+1. The global file, for your model server: `~/.config/plan-complete/config.json`
+   (or `$XDG_CONFIG_HOME/plan-complete/config.json`; on Windows, `%APPDATA%\plan-complete\config.json`).
+   *Plan Complete: Open the Global Settings* creates it.
+2. `<repo>/.plan-complete.json`, for one repository. Its presence opts the repository in.
 3. Editor overrides: VS Code `planComplete.settings`, Neovim `setup({ settings = … })`.
 
-`.plan-complete.json` is the server's file, not a VS Code settings file, and its presence opts the
-repository in. The VS Code settings are only `planComplete.serverPath` (where the binary is),
-`planComplete.settings` (the overrides), and `planComplete.passSignatureHelp` (send the real language
-server's signature help at the cursor).
+Both files are JSON with comments and trailing commas. The file that *Enable* writes lists every field at its
+default, commented out. In VS Code the files have completion and hover text for every field. A change takes
+effect when you save the file in the editor; after a change from outside, restart the server
+(*Plan Complete: Restart Server*, or `:lsp restart`).
+
+For example, a model behind a proxy on another machine, in the global file:
+
+```jsonc
+{
+  "baseURL": "http://192.168.1.20:8080",
+  "model": "qwen2.5-coder-7b",
+}
+```
 
 | Field | Default | Meaning |
 |---|---|---|
 | `baseURL` | `http://127.0.0.1:8012` | Server root. A trailing `/v1` is fine. |
-| `provider` | `llama-infill` | `llama-infill` (`/infill`, server builds the prompt) or `openai-fim` (`/v1/completions`) |
-| `model` | `default` | Model name sent with each request (a proxy such as llama-swap uses it to pick the model) |
+| `provider` | `llama-infill` | `llama-infill` (`/infill`, the server builds the prompt) or `openai-fim` (any `/v1/completions`, Qwen Coder prompt format) |
+| `model` | `default` | Model name sent with each request. A proxy such as llama-swap uses it to pick the model. |
 | `apiKey` | none | Sent as `Authorization: Bearer` |
-| `guide` | `PLAN.md` | The plan: one Markdown file, or a folder whose `.md` files are all read. Repo file only |
+| `guide` | `PLAN.md` | The plan: one Markdown file, or a folder whose `.md` files are all read. Repository file only. |
 | `guideTokenBudget` | `1200` | Most plan tokens in one prompt |
 | `maxTokens` / `maxLines` | `64` / `12` | Size of one completion |
 | `prefixLines` / `suffixLines` | `80` / `40` | Lines of code before and after the cursor |
-| `timeoutMs` / `debounceMs` | `4000` / `60` | Request limit, server-side wait before a request |
-| `useGuide` / `useScope` | `true` / `true` | Turn the plan or the scope summary off |
+| `timeoutMs` / `debounceMs` | `4000` / `60` | Time limit of a model request; wait in the server before one |
+| `useGuide` / `useScope` | `true` / `true` | Turn the plan, or the scope summary and the editor context, off |
+
+`context` is what the editor gathers from the real language server for each request:
+
+| Field | Default | Meaning |
+|---|---|---|
+| `context.signature` | `true` | The signature of the call at the cursor (VS Code) |
+| `context.timeoutMs` | `100` | Longest wait for the language server |
+| `context.tokenBudget` | `300` | Most tokens of editor context in one prompt |
+
+`scoring` is the points that a plan section earns. It is subject to change between versions:
+
+| Field | Default | A section earns it when |
+|---|---|---|
+| `scoring.glob` | `10` | its front-matter `files` match the edited file |
+| `scoring.file` | `8` | it names the edited file |
+| `scoring.symbol` | `4` | a front-matter symbol is near the cursor (each) |
+| `scoring.codeSpan` | `2` | a name in a code span is near the cursor (each, three at most) |
+| `scoring.heading` | `2` | a word of its heading is near the cursor |
+| `scoring.words` | `3` | times the share of its words that are near the cursor |
 
 ## The plan
 
@@ -147,10 +173,10 @@ server's signature help at the cursor).
 
 The server runs only in a repository that opts in:
 
-1. `<repo>/.plan-complete.json` exists. `{}` is enough. With no file the server stays quiet.
+1. `<repo>/.plan-complete.json` exists. *Enable* writes it; an empty `{}` is enough. With no file the server stays quiet.
 2. The plan exists: `PLAN.md` at the repository root, or the file or folder that `guide` in
    `.plan-complete.json` names. A folder needs at least one `.md` file. With no plan the server stays quiet.
-3. The workspace toggle is on (VS Code: click the status bar item; Neovim: `:PlanCompleteToggle`).
+3. The workspace toggle is on (VS Code: the status bar menu; Neovim: `:PlanCompleteToggle`).
 
 Quiet means every completion request returns at once, with no model call. The editor still starts the
 server, so a plan written later turns it on within a second, with no restart.
@@ -166,7 +192,8 @@ completions: you, Claude, or another agent.
 
 ### Writing it
 
-Plain Markdown. No front-matter or special syntax:
+Plain Markdown. No front-matter or special syntax. Text inside `<!-- -->` is not read, so notes to yourself
+stay out of the prompt.
 
 ```markdown
 # Response cache
@@ -226,12 +253,14 @@ priority: 1
 
 | Symptom | Fix |
 |---|---|
-| `spawn plan-complete ENOENT` | Set `planComplete.serverPath` to the full path, then *Restart Server* |
-| `Plan: off (no .plan-complete.json)` | `echo '{}' > .plan-complete.json` at the repository root |
+| `Plan: off (no .plan-complete.json)` | *Enable in This Workspace*, `:PlanCompleteEnable`, or `plan-complete enable` |
 | `Plan: off (no PLAN.md)` | Write `PLAN.md`, or name the plan with `guide` in `.plan-complete.json` |
-| No ghost text | Check the status bar; `Option+\`; *View → Output → Plan Complete*; turn off other completion extensions |
-| `Could not connect to the server` | Nothing at `baseURL`: start llama-server, or set `baseURL` in the global config |
-| Slow first suggestion | The model server is loading the model |
+| `Plan: no model`, `no model server at …` | Nothing answers at `baseURL`: start llama-server, or set `baseURL` in the global settings |
+| `Plan: no model`, `… has no /infill endpoint` | The server is not llama-server: set `"provider": "openai-fim"` |
+| `Plan: no model`, `… did not answer in 4000 ms` | The model is still loading, or is too slow: wait, or raise `timeoutMs` |
+| `the settings could not be read` | `plan-complete config` names the field that is wrong |
+| `"plan-complete" is not on PATH` | Install the `.vsix` of your platform, or set `planComplete.serverPath` to the full path |
+| No ghost text | Check the status bar; `Option+\`; the menu → *Show the log*; turn off other completion extensions |
 | Odd suggestion | `plan-complete probe FILE:LINE:COL --prompt` shows what the model saw |
 | Detailed log | Start the editor with `PLAN_COMPLETE_LOG=/tmp/pc.log` in the environment |
 | The file changed in many places on save | That is your formatter (`editor.formatOnSave`), not this extension |

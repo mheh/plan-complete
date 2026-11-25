@@ -19,12 +19,20 @@ public struct LlamaInfillProvider: CompletionProvider {
             "input_suffix": .string(request.suffix),
             "input_extra": .array(request.extras.map { ["filename": .string($0.path), "text": .string($0.text)] }),
             "n_predict": .int(request.maxTokens),
+            "n_indent": .int(Self.indent(ofLastLine: request.prefix)),
             "temperature": 0,
             "top_k": 20,
             "cache_prompt": true,
             "stream": false,
             "stop": .array(fimStopStrings.map { .string($0) }),
         ]
+    }
+
+    /// With `n_indent` the server ends the completion at the first line that is indented less,
+    /// so the model does not write on to `n_predict` for the cleanup to cut.
+    static func indent(ofLastLine prefix: String) -> Int {
+        let line = prefix.split(separator: "\n", omittingEmptySubsequences: false).last ?? ""
+        return line.prefix { $0 == " " || $0 == "\t" }.count
     }
 
     public func complete(_ request: CompletionRequest) async throws -> String {

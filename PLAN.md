@@ -23,7 +23,7 @@ Editors show the result as ghost text through `textDocument/inlineCompletion`.
   trip works. Windows paths are handled (`C:\` roots, `file:///c%3A/...`, `%APPDATA%`), and CI is its first test.
 - Done: CI (`.github/workflows/ci.yml`): Linux 6.2 and 6.4, macOS, Windows, and the VS Code extension. Actions are
   pinned to commits. The `.build` cache is saved on master only; branches and pull requests restore it.
-- Done: version 0.2.0, "usable from a default install". 75 tests pass (63 core, 12 LSP) on macOS and on Linux
+- Done: version 0.2.0, "usable from a default install". 77 tests pass (65 core, 12 LSP) on macOS and on Linux
   in Docker (Swift 6.2 and 6.4).
   - Settings: nested `context` and `scoring`; layers merge field by field; the files allow comments and
     trailing commas; saving a settings file in the editor reloads it.
@@ -50,11 +50,13 @@ Editors show the result as ghost text through `textDocument/inlineCompletion`.
        and an EMPTY one at `func ` in Swift (the `infill` sampler ends at once). On a 223-line plan with twelve
        steps, the whole plan costs 1471 ms against our 991 ms, and one random chunk mostly holds the wrong
        step. Our selection stays: it is the reason the right step is in a small prompt.
-     - Request shape, the real finding: llama.vim sends the text of the cursor line in `prompt` with
-       `n_indent`, and the server then stops where the block ends. We put the line into `input_prefix`, the
-       model runs to `n_predict` (128 tokens, then `}` many times) and `Postprocess` cuts it. Same completion,
-       measured on the sample: 1317 ms -> 431 ms at `func `, 1319 ms -> 184 ms at `self.init(`.
-       Proposed: send `prompt` and `n_indent` to `/infill` (llama.cpp only; the OpenAI provider stays).
+     - Request shape, the real finding, TESTED on 16 cursor positions in four shapes (Swift, Python,
+       TypeScript, Objective-C; two runs each): `prompt` for the cursor line changes nothing, in time or text.
+       `n_indent` alone makes the server stop where the block ends: 9 of 16 positions got faster (about
+       740 ms -> 150 to 500 ms), 7 did not change (no indent, or the model writes at the same indent to the
+       limit), none got slower. The cleaned text is the same in 15; in one (an open `[` in Python) the old
+       shape ended with a stray `\t)` line and the new one does not.
+       `n_indent` is in `LlamaInfillProvider`, with `ModelTests`. 77 tests pass.
      - Not proposed: the `infill` sampler (empty answer at `func `), the random ring, `t_max_predict_ms`.
      - Idea for later: llama.vim warms the server cache with the extra context while the user does not type
        (`n_predict` 0). Our prompt time is already about 75 ms, so the gain is small.

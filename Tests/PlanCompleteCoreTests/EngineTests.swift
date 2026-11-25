@@ -15,6 +15,12 @@ final class RecordingProvider: CompletionProvider, @unchecked Sendable {
 }
 
 @Suite struct EngineTests {
+    var folderConfig: Config {
+        var config = Config()
+        config.guide = "docs/guide"
+        return config
+    }
+
     func makeRoot() throws -> URL {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent("pc-\(UUID().uuidString)")
         let guide = root.appendingPathComponent("docs/guide")
@@ -33,7 +39,7 @@ final class RecordingProvider: CompletionProvider, @unchecked Sendable {
     @Test func requestHoldsGuideAndScope() async throws {
         let root = try makeRoot()
         let provider = RecordingProvider(reply: "capacity: 10)")
-        let engine = Engine(root: root, config: Config(), provider: provider)
+        let engine = Engine(root: root, config: folderConfig, provider: provider)
         let path = root.appendingPathComponent("Sources/Cache.swift").path
         let doc = TextDocument(path: path, text: "actor ResponseCache {\n    init(capacity: Int) {}\n    convenience init() {\n        self.init(\n    }\n}")
         let result = try await engine.complete(document: doc, line: 3, utf16Column: 18)
@@ -47,7 +53,7 @@ final class RecordingProvider: CompletionProvider, @unchecked Sendable {
     @Test func editorContextReplacesOwnScope() async throws {
         let root = try makeRoot()
         let provider = RecordingProvider(reply: "x")
-        let engine = Engine(root: root, config: Config(), provider: provider)
+        let engine = Engine(root: root, config: folderConfig, provider: provider)
         let doc = TextDocument(path: root.appendingPathComponent("a.swift").path, text: "struct A {\n    func f() {\n        g(\n    }\n}")
         let lsp = ExtraFile(path: "a.swift.signature", text: "g(count: Int)")
         _ = try await engine.complete(document: doc, line: 2, utf16Column: 10, editorContext: [lsp])
@@ -57,7 +63,7 @@ final class RecordingProvider: CompletionProvider, @unchecked Sendable {
     @Test func cacheAndTypeahead() async throws {
         let root = try makeRoot()
         let provider = RecordingProvider(reply: "return a + b")
-        let engine = Engine(root: root, config: Config(), provider: provider)
+        let engine = Engine(root: root, config: folderConfig, provider: provider)
         let path = root.appendingPathComponent("m.swift").path
         let doc = TextDocument(path: path, text: "func add() {\n    \n}")
         _ = try await engine.complete(document: doc, line: 1, utf16Column: 4)
@@ -85,5 +91,67 @@ final class RecordingProvider: CompletionProvider, @unchecked Sendable {
     @Test func configMerge() throws {
         let merged = try Config().merged(with: ["model": "other", "maxTokens": 10])
         #expect(merged.model == "other" && merged.maxTokens == 10 && merged.provider == .llamaInfill)
+    }
+}
+
+@Suite struct PlanFileTests {
+    func makeRoot(_ files: [String: String]) throws -> URL {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent("pc-\(UUID().uuidString)")
+        for (path, text) in files {
+            let url = root.appendingPathComponent(path)
+            try FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
+            try text.write(to: url, atomically: true, encoding: .utf8)
+        }
+        return root
+    }
+
+    @Test func plainPlanIsTheDefault() async throws {
+        let root = try makeRoot([
+            "PLAN.md": """
+            # Cache work
+
+            ## Step 1: ResponseCache
+            Edit `Sources/Net/Cache.swift`. `actor ResponseCache` holds at most 100 items.
+
+            ### Eviction
+            `private func evictIfNeeded()` drops the oldest key.
+
+            ## Step 2: UI
+            Add a `CacheView` in `Sources/UI/CacheView.swift`.
+            """,
+        ])
+        let provider = RecordingProvider(reply: "x")
+        let engine = Engine(root: root, config: Config(), provider: provider)
+        let doc = TextDocument(path: root.appendingPathComponent("Sources/Net/Cache.swift").path, text: "actor ResponseCache {\n    \n}")
+        let result = try await engine.complete(document: doc, line: 1, utf16Column: 4)
+        #expect(result.sources.first == "PLAN.md#Step 1: ResponseCache")
+        #expect(!result.sources.contains("PLAN.md#Step 2: UI"))
+        #expect(await engine.guide().map(\.heading).contains("Eviction"))
+    }
+
+    @Test func guideFolder() async throws {
+        let root = try makeRoot(["notes/a.md": "## A\nalpha", "notes/sub/b.md": "## B\nbeta"])
+        var config = Config()
+        config.guide = "notes"
+        let engine = Engine(root: root, config: config, provider: RecordingProvider(reply: ""))
+        #expect(await engine.guide().map(\.source) == ["notes/a.md", "notes/sub/b.md"])
+    }
+
+    @Test func globalThenRepoConfig() throws {
+        let root = try makeRoot([
+            "global.json": #"{"baseURL": "http://gpu:8090", "model": "m1"}"#,
+            ".plan-complete.json": #"{"model": "m2"}"#,
+        ])
+        let config = try Config.load(root: root, globalFile: root.appendingPathComponent("global.json"))
+        #expect(config.baseURL == "http://gpu:8090")
+        #expect(config.model == "m2")
+        #expect(config.guide == "PLAN.md")
+    }
+
+    @Test func oversizedSectionIsCut() {
+        let chunk = GuideChunk(source: "PLAN.md", heading: "Big", files: [], symbols: [], priority: 0,
+                               text: "Sources/A.swift " + String(repeating: "word ", count: 2000))
+        let picked = GuideSelector(budget: 100).select(chunks: [chunk], path: "Sources/A.swift", window: "")
+        #expect(picked.first?.text.count == 400)
     }
 }

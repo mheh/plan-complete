@@ -33,7 +33,7 @@
         "planComplete.settings": {
           "type": "object",
           "default": {},
-          "description": "Overrides of .plan-complete.json, for example { \"model\": \"qwen2.5-coder\" }."
+          "description": "Overrides of the server config (global file, then .plan-complete.json), for example { \"model\": \"qwen2.5-coder\", \"guide\": \"docs/plan\" }."
         },
         "planComplete.passSignatureHelp": {
           "type": "boolean",

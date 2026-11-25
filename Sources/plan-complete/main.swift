@@ -16,7 +16,7 @@ usage:
 func findRoot(from start: URL) -> URL {
     var dir = start.hasDirectoryPath ? start : start.deletingLastPathComponent()
     while dir.path != "/" {
-        for marker in [Config.fileName, ".git"] where FileManager.default.fileExists(atPath: dir.appendingPathComponent(marker).path) {
+        for marker in [Config.fileName, "PLAN.md", ".git"] where FileManager.default.fileExists(atPath: dir.appendingPathComponent(marker).path) {
             return dir
         }
         dir.deleteLastPathComponent()

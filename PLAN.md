@@ -7,14 +7,16 @@ Editors show the result as ghost text through `textDocument/inlineCompletion`.
 
 ## STATUS
 
-- Done: Phases 0–4 (scaffold, core and probe, LSP server, Neovim, VS Code). 36 tests pass
-  (30 core, 6 LSP). Each editor has an end-to-end check that triggers, accepts, and reads the buffer.
+- Done: Phases 0–4 (scaffold, core and probe, LSP server, Neovim, VS Code). 40 tests pass
+  (34 core, 6 LSP). Each editor has an end-to-end check that triggers, accepts, and reads the buffer.
 - Done after Phase 4, from a trial in a large Swift project:
   - Comment lines: no restated typed text, no double space, one line only, a two-line suffix, and one
     retry with no suffix when the first answer is empty (the model often ends a started comment at once).
   - Trailing spaces of the typed line leave the prompt; a repeated word (`public var ` + `var x`) is dropped.
   - The VS Code client shows a clear message when the binary is missing.
   - `probe --raw` prints the raw model text.
+- Done: the plan is a plain `PLAN.md` at the root by default (`guide` names a file or a folder); settings are
+  global (`~/.config/plan-complete/config.json`), then the repo `.plan-complete.json`, then the editor.
 - Next, open:
   1. Compare guide selection with the llama.vim way (the guide open in a buffer, recent chunks in `input_extra`).
   2. Phase 5, Xcode: choose between the two options below.
@@ -56,8 +58,11 @@ On a 9B Qwen-format coder model on one consumer GPU (llama-server, about 100 tok
 - **Providers behind one protocol**, picked by config: `llama-infill` (`<base>/infill`, the server builds the FIM
   prompt) and `openai-fim` (`<base>/v1/completions`, the client builds the Qwen prompt). A local server and a
   remote one differ only in `baseURL`.
-- **Guide location:** `docs/guide/*.md`, apart from plans. Plans keep the reasoning for agents; the guide is the
-  short version for the model.
+- **The plan is plain Markdown.** The default guide is `PLAN.md` at the root, as stock as possible: `## ` and `### `
+  sections are chunks; a section that names the edited file ranks first; code spans stand in for symbols.
+  Front-matter (`files:`, `symbols:`, `priority:`) is optional. `guide` names another file or a folder.
+- **Settings in layers:** built-in defaults, the global file, the repo `.plan-complete.json`, the editor overrides.
+  Each layer sets only the fields it names. The model server goes in the global file.
 - **Cursor context.** `ScopeContext` finds the enclosing block headers by indentation and the open call at the
   cursor (`self.init(` → `init`), and lists the declarations of that name in the file. It goes into the prompt as
   an extra file `<path>.scope`. A client can send richer context from the real language server in
@@ -65,8 +70,8 @@ On a 9B Qwen-format coder model on one consumer GPU (llama-server, about 100 tok
   When the cursor is in an open call, the completion ends where that call closes.
 - **Cleanup is text only:** FIM tokens, text that repeats the rest of the line or the next line, lines that leave
   the cursor's block, repeated typed words, comment-line rules above.
-- **Defaults point at a local llama-server** (`http://127.0.0.1:8012`); each project sets its own
-  `.plan-complete.json`, which git ignores.
+- **Defaults point at a local llama-server** (`http://127.0.0.1:8012`). A repo `.plan-complete.json` is optional
+  and git ignores it here.
 - **Minimal code comments.** Only where the code cannot say it.
 
 ## Existing tools, and why we still build this
@@ -81,29 +86,27 @@ On a 9B Qwen-format coder model on one consumer GPU (llama-server, about 100 tok
 ## Guide format
 
 ```markdown
----
-files: ["Sources/Net/**"]
-symbols: [ResponseCache, store]
-priority: 2
----
-## ResponseCache
-ResponseCache is an actor. store() evicts LRU when count > 100. No force unwraps.
+## Step 1: ResponseCache in Sources/Net/Cache.swift
+`actor ResponseCache` holds at most 100 items. No force unwraps.
 `func store(_ data: Data, for key: URL) async`
 ```
 
-Each `## ` section is one chunk, with the front-matter of its file. A file with no heading is one chunk.
-Bodies stay short: signatures, invariants, naming rules. The server rereads the folder at most once a second.
+Each `## ` or `### ` section is one chunk. Text before the first heading is one chunk. Optional front-matter
+(`files:`, `symbols:`, `priority:`) applies to every chunk of its file. Score: file glob 10, file named in the
+section 8, symbol 4, code-span name near the cursor 2 (up to 3), heading word 2, word overlap up to 3, priority
+added. Sections with no tie are dropped while any section ties. One section larger than the budget is cut to fit.
+The server rereads the plan at most once a second.
 
-## Config: `.plan-complete.json` at the workspace root (all fields optional)
+## Config: `~/.config/plan-complete/config.json`, then `<root>/.plan-complete.json` (all fields optional)
 
 ```json
 { "baseURL": "http://127.0.0.1:8012", "provider": "llama-infill", "model": "default", "apiKey": null,
-  "guideDir": "docs/guide", "guideTokenBudget": 1200, "maxTokens": 64, "maxLines": 12,
+  "guide": "PLAN.md", "guideTokenBudget": 1200, "maxTokens": 64, "maxLines": 12,
   "prefixLines": 80, "suffixLines": 40, "timeoutMs": 4000, "debounceMs": 60,
   "useGuide": true, "useScope": true }
 ```
 
-LSP `initializationOptions` (VS Code `planComplete.settings`, Neovim `settings`) override the file.
+LSP `initializationOptions` (VS Code `planComplete.settings`, Neovim `settings`) override both files.
 
 ## Layout
 
@@ -118,8 +121,7 @@ Tests/PlanCompleteLSPTests/  server in process, framing
 editors/nvim/lua/plan_complete.lua
 editors/vscode/              client extension, test/run.js (end-to-end)
 scripts/                     lsp-smoke.mjs, nvim-smoke.lua
-examples/sample/             Swift and Python files with a guide
-docs/guide/                  guide for this repository
+examples/sample/             Swift and Python files with a plain PLAN.md
 ```
 
 ## Phases

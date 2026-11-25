@@ -10,7 +10,7 @@ public struct Config: Sendable, Equatable, Codable {
     public var provider: ProviderKind = .llamaInfill
     public var model: String = "default"
     public var apiKey: String? = nil
-    public var guideDir: String = "docs/guide"
+    public var guide: String = "PLAN.md"
     public var guideTokenBudget: Int = 1200
     public var maxTokens: Int = 64
     public var maxLines: Int = 12
@@ -32,7 +32,7 @@ public struct Config: Sendable, Equatable, Codable {
         provider = try c.decodeIfPresent(ProviderKind.self, forKey: .provider) ?? d.provider
         model = try c.decodeIfPresent(String.self, forKey: .model) ?? d.model
         apiKey = try c.decodeIfPresent(String.self, forKey: .apiKey)
-        guideDir = try c.decodeIfPresent(String.self, forKey: .guideDir) ?? d.guideDir
+        guide = try c.decodeIfPresent(String.self, forKey: .guide) ?? d.guide
         guideTokenBudget = try c.decodeIfPresent(Int.self, forKey: .guideTokenBudget) ?? d.guideTokenBudget
         maxTokens = try c.decodeIfPresent(Int.self, forKey: .maxTokens) ?? d.maxTokens
         maxLines = try c.decodeIfPresent(Int.self, forKey: .maxLines) ?? d.maxLines
@@ -44,10 +44,22 @@ public struct Config: Sendable, Equatable, Codable {
         useScope = try c.decodeIfPresent(Bool.self, forKey: .useScope) ?? d.useScope
     }
 
-    public static func load(root: URL) throws -> Config {
-        let url = root.appendingPathComponent(fileName)
-        guard let data = try? Data(contentsOf: url) else { return Config() }
-        return try JSONDecoder().decode(Config.self, from: data)
+    /// Defaults, then the global file, then `<root>/.plan-complete.json`. Each file sets only the fields it names.
+    public static func load(root: URL, globalFile: URL? = Config.globalFile) throws -> Config {
+        var config = Config()
+        for url in [globalFile, root.appendingPathComponent(fileName)].compactMap({ $0 }) {
+            guard let data = try? Data(contentsOf: url) else { continue }
+            config = try config.merged(with: try JSONValue.decode(data))
+        }
+        return config
+    }
+
+    /// `$XDG_CONFIG_HOME/plan-complete/config.json`, or `~/.config/plan-complete/config.json`.
+    public static var globalFile: URL {
+        let env = ProcessInfo.processInfo.environment
+        let base = env["XDG_CONFIG_HOME"].map { URL(fileURLWithPath: $0, isDirectory: true) }
+            ?? FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent(".config", isDirectory: true)
+        return base.appendingPathComponent("plan-complete/config.json")
     }
 
     public func merged(with overrides: JSONValue?) throws -> Config {

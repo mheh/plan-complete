@@ -65,7 +65,7 @@ public enum Guide {
         return (front, body)
     }
 
-    /// One chunk per `## ` section, plus one for text before the first section.
+    /// One chunk per `## ` or `### ` section, plus one for text before the first section.
     public static func parse(markdown: String, source: String) -> [GuideChunk] {
         let (front, body) = splitFrontMatter(markdown)
         var chunks: [GuideChunk] = []
@@ -84,9 +84,9 @@ public enum Guide {
 
         for line in body.components(separatedBy: "\n") {
             if line.hasPrefix("```") { inFence.toggle() }
-            if !inFence && line.hasPrefix("## ") {
+            if !inFence, let level = headingLevel(line), level == 2 || level == 3 {
                 flush()
-                heading = String(line.dropFirst(3)).trimmingCharacters(in: .whitespaces)
+                heading = String(line.drop { $0 == "#" }).trimmingCharacters(in: .whitespaces)
             }
             buffer.append(line)
         }
@@ -94,21 +94,31 @@ public enum Guide {
         return chunks
     }
 
-    public static func load(directory: URL, root: URL) -> [GuideChunk] {
-        let files = markdownFiles(in: directory)
+    /// `path` is one Markdown file or a folder of them.
+    public static func load(path: URL, root: URL) -> [GuideChunk] {
+        let files = markdownFiles(at: path)
         return files.flatMap { url -> [GuideChunk] in
             guard let text = try? String(contentsOf: url, encoding: .utf8) else { return [] }
             return parse(markdown: text, source: relativePath(of: url, to: root))
         }
     }
 
-    public static func markdownFiles(in directory: URL) -> [URL] {
-        guard let enumerator = FileManager.default.enumerator(at: directory, includingPropertiesForKeys: nil) else {
+    public static func markdownFiles(at path: URL) -> [URL] {
+        var isDirectory: ObjCBool = false
+        guard FileManager.default.fileExists(atPath: path.path, isDirectory: &isDirectory) else { return [] }
+        if !isDirectory.boolValue { return [path] }
+        guard let enumerator = FileManager.default.enumerator(at: path, includingPropertiesForKeys: nil) else {
             return []
         }
         return enumerator.compactMap { $0 as? URL }
             .filter { $0.pathExtension.lowercased() == "md" }
             .sorted { $0.path < $1.path }
+    }
+
+    static func headingLevel(_ line: String) -> Int? {
+        let hashes = line.prefix { $0 == "#" }.count
+        guard hashes > 0, line.dropFirst(hashes).first == " " else { return nil }
+        return hashes
     }
 
     static func unquote(_ value: String) -> String {

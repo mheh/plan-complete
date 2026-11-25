@@ -42,15 +42,15 @@ public actor Engine {
     public func guide(now: Date = Date()) -> [GuideChunk] {
         guard now.timeIntervalSince(lastGuideCheck) >= 1 else { return chunks }
         lastGuideCheck = now
-        let directory = root.appendingPathComponent(config.guideDir)
+        let location = root.appendingPathComponent(config.guide)
         var signature: [String: Date] = [:]
-        for url in Guide.markdownFiles(in: directory) {
+        for url in Guide.markdownFiles(at: location) {
             signature[url.path] = (try? url.resourceValues(forKeys: [.contentModificationDateKey]))?
                 .contentModificationDate ?? .distantPast
         }
         if signature != guideSignature {
             guideSignature = signature
-            chunks = Guide.load(directory: directory, root: root)
+            chunks = Guide.load(path: location, root: root)
             resetCaches()
         }
         return chunks
@@ -131,8 +131,9 @@ public actor Engine {
             text = Postprocess.clean(raw, linePrefix: prepared.context.linePrefix, suffix: prepared.context.suffix,
                                      maxLines: config.maxLines)
         }
+        let guideSources = Set(prepared.guide.map(\.source))
         let sources = prepared.guide.map { chunk in chunk.heading.map { "\(chunk.source)#\($0)" } ?? chunk.source }
-            + request.extras.map(\.path).filter { $0.hasSuffix(".scope") || !$0.hasPrefix(config.guideDir) }
+            + request.extras.map(\.path).filter { !guideSources.contains($0) }
         let completion = Completion(text: text, sources: sources, fromCache: false, raw: raw)
         let entry = Entry(path: request.path, prefix: request.prefix, suffix: request.suffix, completion: completion)
         cache.set(entry, for: key)

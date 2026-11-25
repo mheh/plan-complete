@@ -5,7 +5,7 @@ vim.opt.rtp:append("/path/to/xcode-mcp-autocomplete/editors/nvim")
 require("plan_complete").setup({
   cmd = { "/path/to/xcode-mcp-autocomplete/.build/release/plan-complete", "serve" },
   -- filetypes = { "swift", "python" },   -- default: every file type
-  -- settings = { model = "qwen2.5-coder" },  -- overrides .plan-complete.json
+  -- settings = { model = "qwen2.5-coder" },  -- overrides the config files
 })
 ```
 

@@ -26,7 +26,7 @@ const { runTests } = require("@vscode/test-electron");
 
 function findRoot(dir) {
   for (let d = dir; d !== path.dirname(d); d = path.dirname(d)) {
-    if (fs.existsSync(path.join(d, ".plan-complete.json")) || fs.existsSync(path.join(d, ".git"))) return d;
+    if ([".plan-complete.json", "PLAN.md", ".git"].some((m) => fs.existsSync(path.join(d, m)))) return d;
   }
   return dir;
 }

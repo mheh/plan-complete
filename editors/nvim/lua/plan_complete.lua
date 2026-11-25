@@ -6,6 +6,8 @@
 -- project has a .plan-complete.json and its plan (PLAN.md by default).
 -- :PlanCompleteEnable opts the project in. <Tab> accepts, <M-]> / <M-[> cycle.
 -- :PlanCompleteToggle turns it off and on for this session.
+local symbols = require("plan_complete.symbols")
+
 local M = {}
 
 local defaults = {
@@ -32,6 +34,21 @@ function M.statusline()
     return "Plan: off (" .. state.reason .. ")"
   end
   return state.problem and "Plan: no model" or "Plan: on"
+end
+
+local function sends_symbols()
+  return state.context ~= nil and state.context.symbols == true
+end
+
+local function with_symbol_path(client)
+  local request = client.request
+  client.request = function(self, method, params, handler, bufnr)
+    if method == "textDocument/inlineCompletion" and sends_symbols() then
+      local buf = vim.uri_to_bufnr(params.textDocument.uri)
+      params = vim.tbl_extend("force", params, { symbolPath = symbols.at(buf, params.position) })
+    end
+    return request(self, method, params, handler, bufnr)
+  end
 end
 
 local function clients()
@@ -86,17 +103,21 @@ function M.setup(opts)
       end,
     },
     on_init = function(client)
+      with_symbol_path(client)
       if not enabled then
         client:request("planComplete/setEnabled", { enabled = false }, function() end)
       end
     end,
   })
 
+  local group = vim.api.nvim_create_augroup("plan_complete", { clear = true })
+  symbols.watch(group)
+
   if opts.filetypes then
     vim.lsp.enable("plan_complete")
   else
     vim.api.nvim_create_autocmd("FileType", {
-      group = vim.api.nvim_create_augroup("plan_complete", { clear = true }),
+      group = group,
       callback = function(args)
         if vim.bo[args.buf].buftype ~= "" then
           return

@@ -154,7 +154,7 @@ For example, a model behind a proxy on another machine, in the global file:
 | Field | Default | Meaning |
 |---|---|---|
 | `context.signature` | `true` | The signature of the call at the cursor (VS Code) |
-| `context.symbols` | `true` | The type and the member that enclose the cursor, to rank the plan (VS Code) |
+| `context.symbols` | `true` | The type and the member that enclose the cursor, to rank the plan |
 | `context.timeoutMs` | `100` | Longest wait for the language server |
 | `context.tokenBudget` | `300` | Most tokens of editor context in one prompt |
 

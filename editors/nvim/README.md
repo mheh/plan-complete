@@ -20,8 +20,12 @@ and its plan (`PLAN.md` by default).
 | `:PlanCompleteStatus` | Shows the state, and why the model server failed when it did |
 
 - `<Tab>` accepts, `<M-]>` / `<M-[>` cycle. Neovim debounces requests by 200 ms.
+- When the buffer has a language server with document symbols, the type and the member that enclose the
+  cursor go with each request and rank the plan. `"context": { "symbols": false }` in the settings turns
+  that off.
 - Statusline: `require("plan_complete").statusline()` gives `Plan: on`, `Plan: no model` or
   `Plan: off (no PLAN.md)`.
 
 Check: `PC_BIN=$PWD/.build/debug/plan-complete PC_LINE=13 PC_COL=18 nvim --headless -u scripts/nvim-smoke.lua examples/sample/Sources/Net/Cache.swift`
-(`PC_EXPECT=off` for a project that is not opted in).
+(`PC_EXPECT=off` for a project that is not opted in; `PC_LSP="typescript-language-server --stdio"` also
+starts a real language server, and `PLAN_COMPLETE_LOG=FILE` then shows the `symbols` line of the request).

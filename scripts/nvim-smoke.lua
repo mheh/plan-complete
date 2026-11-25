@@ -1,5 +1,6 @@
 -- PC_BIN=... PC_LINE=13 PC_COL=18 nvim --headless -u scripts/nvim-smoke.lua FILE
 -- PC_LINE is 1-based, PC_COL 0-based. Prints the ghost text, accepts it, prints the line.
+-- PC_LSP="typescript-language-server --stdio" also starts a real language server, for the symbol path.
 local repo = vim.fn.fnamemodify(debug.getinfo(1, "S").source:sub(2), ":p:h:h")
 vim.opt.rtp:prepend(repo .. "/editors/nvim")
 vim.opt.swapfile = false
@@ -13,13 +14,25 @@ end
 
 require("plan_complete").setup({ cmd = { vim.env.PC_BIN, "serve" } })
 
+if vim.env.PC_LSP then
+  vim.api.nvim_create_autocmd("FileType", {
+    callback = function(args)
+      vim.lsp.start({ name = "real", cmd = vim.split(vim.env.PC_LSP, " "), root_dir = vim.fn.getcwd() }, { bufnr = args.buf })
+    end,
+  })
+end
+
+local attached = false
 vim.api.nvim_create_autocmd("LspAttach", {
-  once = true,
   callback = function(args)
-    vim.schedule(function()
+    if attached or vim.lsp.get_client_by_id(args.data.client_id).name ~= "plan_complete" then
+      return
+    end
+    attached = true
+    vim.defer_fn(function()
       vim.api.nvim_win_set_cursor(0, { line, col })
       vim.api.nvim_feedkeys("a", "n", false)
-    end)
+    end, vim.env.PC_LSP and 4000 or 0)
     local ns = vim.api.nvim_create_namespace("nvim.lsp.inline_completion")
     local started = vim.uv.now()
     local timer = vim.uv.new_timer()
@@ -50,4 +63,4 @@ vim.api.nvim_create_autocmd("LspAttach", {
   end,
 })
 
-vim.defer_fn(function() finish(1, "FAIL: client did not attach") end, 15000)
+vim.defer_fn(function() finish(1, "FAIL: client did not attach") end, 20000)

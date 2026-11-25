@@ -38,9 +38,13 @@ Editors show the result as ghost text through `textDocument/inlineCompletion`.
     has not run yet.
 - Next, open:
   0. RESUME HERE (2026-11-25). `v0.2.0` is NOT tagged; the user decides. The release job has never run.
-     The symbol path is built and the user ruled "keep it" (see Decisions). Next: the items below.
-  1. Symbol path, what is left: Neovim sends no `symbolPath` yet (VS Code does). The receiver type from hover
-     (`context.hover`) and the declaration of the called name (`context.definition`) are ideas, not planned.
+     Master is at `68cadbe`, CI green (run 45572896860), nothing else uncommitted but this note.
+     The symbol path is built and the user ruled "keep it" (see Decisions).
+     Neovim sends the symbol path too (`editors/nvim/lua/plan_complete/symbols.lua`; checked headless with
+     typescript-language-server: the trace shows `RequestQueue > warm`).
+     THE USER ASKED FOR ITEM 2 BELOW: discuss the findings with the user before any change of the design.
+  1. Symbol path, ideas that are not planned: the receiver type from hover (`context.hover`) and the
+     declaration of the called name (`context.definition`).
   2. Compare guide selection with the llama.vim way (the guide open in a buffer, recent chunks in `input_extra`).
   3. Phase 5, Xcode: choose between the two options below.
   4. Tag `v0.2.0` after CI is green, and check the Windows `.vsix` on a Windows machine.
@@ -178,7 +182,8 @@ Sources/PlanCompleteLSP/     LSPServer (state and dispatch), InlineCompletion, W
 Sources/plan-complete/       main (usage and dispatch), Commands (`enable`, `config`), Probe, Root
 Tests/PlanCompleteCoreTests/ one file for each subject; Support.swift has the shared helpers
 Tests/PlanCompleteLSPTests/  server in process, framing
-editors/nvim/lua/plan_complete.lua
+editors/nvim/lua/plan_complete.lua           the client
+editors/nvim/lua/plan_complete/symbols.lua   the symbol path from the real language server
 editors/vscode/              src/{extension,server,status,context,symbols}.ts, schemas/, test/run.js (end-to-end)
 scripts/                     lsp-smoke.mjs, nvim-smoke.lua, package.sh (the .vsix files and archives)
 examples/sample/             Swift and Python files with a plain PLAN.md

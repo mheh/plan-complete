@@ -3,6 +3,7 @@ name: CI
 on:
   push:
     branches: [master]
+    tags: ["v*"]
   pull_request:
   workflow_dispatch:
 
@@ -16,6 +17,8 @@ permissions:
 env:
   SWIFT_WINDOWS_BRANCH: swift-6.4.2-release
   SWIFT_WINDOWS_TAG: 6.4.2-RELEASE
+  STATIC_SDK_URL: https://download.swift.org/swift-6.4.2-release/static-sdk/swift-6.4.2-RELEASE/swift-6.4.2-RELEASE_static-linux-0.1.0.artifactbundle.tar.gz
+  STATIC_SDK_CHECKSUM: 3786b179936d9cc9e266dd506bd1654176358d7b25288e243359f4d17cc4dc5a
 
 jobs:
   linux:
@@ -46,6 +49,40 @@ jobs:
           path: .build
           key: ${{ steps.cache.outputs.cache-primary-key }}
 
+  linux-static:
+    name: Linux static binaries
+    runs-on: ubuntu-24.04
+    container: swift:6.4.2-noble
+    timeout-minutes: 45
+    steps:
+      - run: apt-get update -yq && apt-get install -y curl zstd
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - run: swift sdk install "$STATIC_SDK_URL" --checksum "$STATIC_SDK_CHECKSUM"
+      - name: Build for x64 and arm64
+        shell: bash
+        run: |
+          build() {
+            swift build -c release --swift-sdk "$1-swift-linux-musl" -Xlinker --strip-all "${@:3}"
+          }
+          for pair in x86_64:x64 aarch64:arm64; do
+            arch=${pair%%:*}
+            out=dist/linux-${pair##*:}
+            build "$arch" -
+            mkdir -p "$out"
+            cp "$(build "$arch" - --show-bin-path)/plan-complete" "$out/"
+          done
+          dist/linux-x64/plan-complete --version
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: bin-linux-x64
+          path: dist/linux-x64
+          if-no-files-found: error
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: bin-linux-arm64
+          path: dist/linux-arm64
+          if-no-files-found: error
+
   macos:
     name: macOS
     runs-on: macos-26
@@ -61,7 +98,17 @@ jobs:
           restore-keys: build-macos-
       - run: swift build --build-tests
       - run: swift test --skip-build
-      - run: swift build -c release
+      - name: Build the universal binary
+        run: |
+          swift build -c release --arch arm64 --arch x86_64
+          mkdir -p dist/darwin
+          cp "$(swift build -c release --arch arm64 --arch x86_64 --show-bin-path)/plan-complete" dist/darwin/
+          dist/darwin/plan-complete --version
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: bin-darwin
+          path: dist/darwin
+          if-no-files-found: error
       - if: github.ref == 'refs/heads/master' && steps.cache.outputs.cache-hit != 'true'
         uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
@@ -87,20 +134,31 @@ jobs:
           restore-keys: build-windows-${{ env.SWIFT_WINDOWS_TAG }}-
       - run: swift build --build-tests
       - run: swift test --skip-build
-      - run: swift build -c release
+      - name: Build the static binary
+        shell: pwsh
+        run: |
+          swift build -c release --static-swift-stdlib
+          $bin = swift build -c release --static-swift-stdlib --show-bin-path
+          New-Item -ItemType Directory -Force dist/windows-x64 | Out-Null
+          Copy-Item "$bin/plan-complete.exe" dist/windows-x64/
+          dist/windows-x64/plan-complete.exe --version
+          llvm-readobj --coff-imports dist/windows-x64/plan-complete.exe | Select-String "^\s*Name:"
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: bin-windows-x64
+          path: dist/windows-x64
+          if-no-files-found: error
       - if: github.ref == 'refs/heads/master' && steps.cache.outputs.cache-hit != 'true'
         uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: .build
           key: ${{ steps.cache.outputs.cache-primary-key }}
 
-  vscode:
+  package:
     name: VS Code extension
+    needs: [macos, linux-static, windows]
     runs-on: ubuntu-24.04
     timeout-minutes: 15
-    defaults:
-      run:
-        working-directory: editors/vscode
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
@@ -109,10 +167,39 @@ jobs:
           cache: npm
           cache-dependency-path: editors/vscode/package-lock.json
       - run: npm ci --ignore-scripts
+        working-directory: editors/vscode
       - run: npm run typecheck
-      - run: npm run package
+        working-directory: editors/vscode
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          pattern: bin-*
+          path: bins
+      - name: Package
+        run: |
+          for dir in bins/bin-*; do mv "$dir" "bins/${dir#bins/bin-}"; done
+          scripts/package.sh bins dist
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
-          name: plan-complete-vsix
-          path: editors/vscode/*.vsix
+          name: plan-complete
+          path: dist
           if-no-files-found: error
+
+  release:
+    name: Release
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: [linux, package]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: plan-complete
+          path: dist
+      - name: Check that the tag is the version
+        run: test "$GITHUB_REF_NAME" = "v$(sed -n 's/.*version = "\(.*\)"/\1/p' Sources/PlanCompleteCore/Support/Version.swift)"
+      - run: gh release create "$GITHUB_REF_NAME" dist/* --title "$GITHUB_REF_NAME" --generate-notes
+        env:
+          GH_TOKEN: ${{ github.token }}

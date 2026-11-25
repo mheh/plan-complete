@@ -38,6 +38,27 @@ import Testing
 }
 
 @Suite struct RepeatTests {
+    @Test func anIndentedBlankLineKeepsItsIndent() {
+        #expect(Postprocess.clean(" store(a)", linePrefix: "    ", suffix: "\n}", maxLines: 5) == "store(a)")
+        #expect(Postprocess.clean("\n        store(a)\n        b()", linePrefix: "        ", suffix: "\n}", maxLines: 5)
+            == "store(a)\n        b()")
+        #expect(Postprocess.clean("\n            deeper()", linePrefix: "        ", suffix: "\n}", maxLines: 5) == "    deeper()")
+        #expect(Postprocess.clean("    store(a)", linePrefix: "", suffix: "\n}", maxLines: 5) == "    store(a)")
+    }
+
+    @Test func cutsALoop() {
+        let pair = "push(url);\n    flush();\n    return n;\n    flush();\n    return n;\n    flush();\n    return n"
+        #expect(Postprocess.clean(pair, linePrefix: "    ", suffix: "\n}", maxLines: 12) == "push(url);\n    flush();\n    return n;")
+        #expect(Postprocess.cutLoop(["a()", "a()", "a()", "a()"]) == ["a()"])
+    }
+
+    @Test func keepsWhatOnlyLooksLikeALoop() {
+        #expect(Postprocess.cutLoop(["a()", "a()", "b()"]) == ["a()", "a()", "b()"])
+        #expect(Postprocess.cutLoop(["if a {", "    x()", "}", "if b {", "    x()", "}"]).count == 6)
+        #expect(Postprocess.cutLoop(["x {", "}", "", "", "", "y"]).count == 6)
+        #expect(Postprocess.cutLoop(["    }", "}", "}"]).count == 3)
+    }
+
     @Test func noRepeatedKeyword() {
         #expect(Postprocess.clean("var fs_total: Int32 {", linePrefix: "public var ", suffix: "", maxLines: 4) == "fs_total: Int32 {")
         #expect(Postprocess.clean(" var fs_x: Int32", linePrefix: "public ", suffix: "", maxLines: 4) == "var fs_x: Int32")

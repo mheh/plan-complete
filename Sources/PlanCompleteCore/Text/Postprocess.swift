@@ -14,11 +14,13 @@ public enum Postprocess {
             if linePrefix.last == " " { rest = rest.drop { $0 == " " } }
             lines = [String(rest)] + lines.dropFirst(2)
         }
+        if typed.isEmpty, !linePrefix.isEmpty { lines = fitIndentedBlankLine(lines, indent: linePrefix) }
         if linePrefix.last == " ", !typed.isEmpty, let first = lines.first, first.first == " " {
             lines[0] = String(first.drop { $0 == " " })
         }
         if linePrefix.last == " ", let first = lines.first { lines[0] = dropRepeatedWords(first, after: typed) }
         if isCommentLine(typed) { lines = Array(lines.prefix(1)) }
+        lines = cutLoop(lines)
         let lineRest = suffix.prefix { $0 != "\n" }
         let nextLine = suffix.components(separatedBy: "\n").dropFirst()
             .first { !$0.trimmingCharacters(in: .whitespaces).isEmpty }?
@@ -66,6 +68,40 @@ public enum Postprocess {
             }
         }
         return text
+    }
+
+    /// The cursor is after the indent of a blank line. The model sometimes starts on a new line and writes
+    /// that indent again, or starts with one stray space.
+    static func fitIndentedBlankLine(_ lines: [String], indent: String) -> [String] {
+        var lines = lines
+        let blank = lines.prefix { $0.trimmingCharacters(in: .whitespaces).isEmpty }.count
+        if blank > 0, blank < lines.count {
+            lines.removeFirst(blank)
+            if lines[0].hasPrefix(indent) { lines[0] = String(lines[0].dropFirst(indent.count)) }
+        } else if let first = lines.first, first.hasPrefix(" "), !first.hasPrefix("  ") {
+            lines[0] = String(first.dropFirst())
+        }
+        return lines
+    }
+
+    /// A small model can repeat a line, or a group of lines, until the token limit. Keeps the first copy:
+    /// a group of two to four lines that comes twice in a row, or one line that comes three times.
+    static func cutLoop(_ lines: [String]) -> [String] {
+        let keys = lines.map { $0.trimmingCharacters(in: .whitespaces) }
+        for start in keys.indices {
+            for size in 1...4 where start + size * 2 <= keys.count {
+                let group = keys[start..<(start + size)]
+                guard group.contains(where: { $0.count > 1 }) else { continue }
+                let copies = size == 1 ? 3 : 2
+                guard start + size * copies <= keys.count else { continue }
+                let repeats = (1..<copies).allSatisfy { copy in
+                    let from = start + size * copy
+                    return keys[from..<(from + size)].elementsEqual(group)
+                }
+                if repeats { return Array(lines.prefix(start + size)) }
+            }
+        }
+        return lines
     }
 
     /// `public var ` + `var x` gives `x`: drops leading words of the completion that end the typed text.

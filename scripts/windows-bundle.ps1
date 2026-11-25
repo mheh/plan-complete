@@ -23,7 +23,7 @@ $queue.Enqueue((Join-Path $Out "plan-complete.exe"))
 $seen = @{}
 while ($queue.Count -gt 0) {
     foreach ($name in Get-Imports $queue.Dequeue()) {
-        if ($seen[$name.ToLower()]) { continue }
+        if ($seen[$name.ToLower()] -or $name -match "^(api|ext)-ms-") { continue }
         $seen[$name.ToLower()] = $true
         $found = Get-Command $name -CommandType Application -ErrorAction SilentlyContinue | Select-Object -First 1
         if (-not $found -or $found.Source.StartsWith($system, "OrdinalIgnoreCase")) { continue }

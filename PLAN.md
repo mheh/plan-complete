@@ -36,7 +36,10 @@ Editors show the result as ghost text through `textDocument/inlineCompletion`.
     with its Swift runtime DLLs beside it (`scripts/windows-bundle.ps1`; static linking fails there, no `curl.lib`), packages one `.vsix` for each VS Code target with `scripts/package.sh`, and on a `v*` tag makes
     the GitHub release. The Windows binary and the release job have not run yet.
 - Next, open:
-  0. The symbol path: `context.symbols` (default on). The VS Code client caches `textDocument/documentSymbol`
+  0. RESUME HERE (2026-11-25). CI is green on master (run 45567976892): all platforms, every `.vsix` packaged.
+     `v0.2.0` is NOT tagged; the user decides. The release job has never run.
+     - Then the symbol path, below.
+  1. The symbol path: `context.symbols` (default on). The VS Code client caches `textDocument/documentSymbol`
      for each file and sends the enclosing path (`ResponseCache > init()`) as `extraContext`. The server scores
      a section that names the enclosing type +8 and the member +4 (`scoring.type`, `scoring.member`), and
      ignores generic names (`init`, `body`, `description`, under four characters). Compare with and without it
@@ -100,6 +103,12 @@ On a 9B Qwen-format coder model on one consumer GPU (llama-server, about 100 tok
   the cursor's block, repeated typed words, comment-line rules above.
 - **Defaults point at a local llama-server** (`http://127.0.0.1:8012`). The model server goes in the global file.
   This repository opts in with a root `.plan-complete.json`, which git ignores here.
+- **`URLSession` everywhere; the Linux binary stays 58 MB (25 MB as a `.vsix`).** Measured on static musl arm64,
+  stripped: `FoundationEssentials` alone 9.6 MB, Foundation 54.2 MB, with FoundationNetworking 57.2 MB.
+  `URLSession` needs all of Foundation, so `#if canImport(FoundationEssentials)` alone saves nothing. Rejected:
+  AsyncHTTPClient (about 20 MB, about 20 packages, 114 s clean build, no Windows support yet); our own
+  plain-HTTP client (about 10 MB, no HTTPS); linker flags (`--gc-sections`, `--icf=all`, `-Osize` save 0.5%:
+  37 MB is read-only data); jemalloc (an allocator, not a size tool).
 - **Minimal code comments.** Only where the code cannot say it.
 - **Actors, no locks.** Shared state lives in an actor (`Engine`, `LSPServer`, the test doubles). No mutex, no
   `@unchecked Sendable`.

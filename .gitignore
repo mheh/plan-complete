@@ -7,3 +7,4 @@ editors/vscode/out/
 editors/vscode/.vscode-test/
 .plan-complete.json
 !examples/sample/.plan-complete.json
+editors/vscode/bin/

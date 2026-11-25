@@ -84,6 +84,7 @@ public actor Engine {
 
     /// `editorContext` is what the editor got from the real language server, for example signature help.
     public func prepare(document: TextDocument, line: Int, utf16Column: Int, editorContext: [ExtraFile] = []) -> Prepared {
+        let editorContext = Self.trimmed(editorContext, tokens: config.context.tokenBudget)
         let context = document.context(line: line, utf16Column: utf16Column,
                                        prefixLines: config.prefixLines, suffixLines: config.suffixLines)
         let path = relativePath(of: URL(fileURLWithPath: document.path), to: root)
@@ -91,7 +92,8 @@ public actor Engine {
         if config.useGuide {
             let window = context.window + "\n" + context.scope.outline.joined(separator: "\n")
                 + "\n" + editorContext.map(\.text).joined(separator: "\n")
-            selected = GuideSelector(budget: config.guideTokenBudget).select(chunks: guide(), path: path, window: window)
+            selected = GuideSelector(budget: config.guideTokenBudget, scoring: config.scoring)
+                .select(chunks: guide(), path: path, window: window)
         }
         var extras = Self.extras(from: selected)
         if config.useScope {
@@ -102,7 +104,8 @@ public actor Engine {
         var suffix = context.suffix
         let typed = context.linePrefix.trimmingCharacters(in: .whitespaces)
         if Postprocess.isCommentLine(typed) {
-            suffix = String(suffix.split(separator: "\n", maxSplits: 3, omittingEmptySubsequences: false).prefix(3).joined(separator: "\n"))
+            suffix = suffix.split(separator: "\n", maxSplits: 3, omittingEmptySubsequences: false)
+                .prefix(3).joined(separator: "\n")
         }
         if context.linePrefix.contains(where: { $0 != " " && $0 != "\t" }) {
             while prefix.last == " " { prefix.removeLast() }
@@ -114,6 +117,18 @@ public actor Engine {
         let request = CompletionRequest(path: path, prefix: prefix, suffix: suffix,
                                         extras: extras, maxTokens: config.maxTokens)
         return Prepared(request: request, context: context, guide: selected)
+    }
+
+    /// The first items win; the one that crosses the budget is cut.
+    static func trimmed(_ extras: [ExtraFile], tokens: Int) -> [ExtraFile] {
+        var left = max(0, tokens) * 4
+        var kept: [ExtraFile] = []
+        for var extra in extras where left > 0 {
+            if extra.text.utf8.count > left { extra.text = String(extra.text.prefix(left)) }
+            left -= extra.text.utf8.count
+            kept.append(extra)
+        }
+        return kept
     }
 
     /// One extra file for each guide file; the best chunks come last, nearest the cursor.
@@ -185,35 +200,5 @@ public actor Engine {
     static func cacheKey(_ request: CompletionRequest) -> String {
         let extras = request.extras.map { "\($0.path)\u{1}\($0.text)" }.joined(separator: "\u{2}")
         return "\(request.path)\u{0}\(request.prefix.suffix(600))\u{0}\(request.suffix.prefix(300))\u{0}\(extras.hashValue)"
-    }
-}
-
-struct LRUCache<Key: Hashable & Sendable, Value: Sendable>: Sendable {
-    let capacity: Int
-    private var values: [Key: Value] = [:]
-    private var order: [Key] = []
-
-    init(capacity: Int) { self.capacity = capacity }
-
-    mutating func value(for key: Key) -> Value? {
-        guard let value = values[key] else { return nil }
-        touch(key)
-        return value
-    }
-
-    mutating func set(_ value: Value, for key: Key) {
-        if values[key] == nil, values.count >= capacity, let oldest = order.first {
-            order.removeFirst()
-            values[oldest] = nil
-        }
-        values[key] = value
-        touch(key)
-    }
-
-    mutating func removeAll() { values.removeAll(); order.removeAll() }
-
-    private mutating func touch(_ key: Key) {
-        if let index = order.firstIndex(of: key) { order.remove(at: index) }
-        order.append(key)
     }
 }

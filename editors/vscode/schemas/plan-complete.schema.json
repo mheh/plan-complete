@@ -1,0 +1,49 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "plan-complete-settings",
+  "title": "plan-complete settings",
+  "type": "object",
+  "allowComments": true,
+  "allowTrailingCommas": true,
+  "properties": {
+    "baseURL": { "type": "string", "default": "http://127.0.0.1:8012", "description": "Root of the model server. A trailing /v1 is fine." },
+    "provider": {
+      "enum": ["llama-infill", "openai-fim"], "default": "llama-infill",
+      "enumDescriptions": ["llama-server /infill: the server builds the prompt.", "Any /v1/completions server, with the Qwen Coder prompt format."],
+      "description": "How to ask the model."
+    },
+    "model": { "type": "string", "default": "default", "description": "Model name sent with each request. A proxy such as llama-swap uses it to pick the model." },
+    "apiKey": { "type": ["string", "null"], "default": null, "description": "Sent as Authorization: Bearer." },
+    "guide": { "type": "string", "default": "PLAN.md", "description": "The plan: one Markdown file, or a folder whose .md files are all read. A relative path inside the repository. Read from .plan-complete.json only." },
+    "guideTokenBudget": { "type": "integer", "minimum": 0, "default": 1200, "description": "Most plan tokens in one prompt." },
+    "maxTokens": { "type": "integer", "minimum": 1, "default": 64, "description": "Most tokens in one completion." },
+    "maxLines": { "type": "integer", "minimum": 1, "default": 12, "description": "Most lines in one completion." },
+    "prefixLines": { "type": "integer", "minimum": 0, "default": 80, "description": "Lines of code before the cursor." },
+    "suffixLines": { "type": "integer", "minimum": 0, "default": 40, "description": "Lines of code after the cursor." },
+    "timeoutMs": { "type": "integer", "minimum": 1, "default": 4000, "description": "Time limit of one model request." },
+    "debounceMs": { "type": "integer", "minimum": 0, "default": 60, "description": "Wait in the server before a request, so fast typing sends one." },
+    "useGuide": { "type": "boolean", "default": true, "description": "Put the plan into the prompt." },
+    "useScope": { "type": "boolean", "default": true, "description": "Put what encloses the cursor, and the editor context, into the prompt." },
+    "context": {
+      "type": "object", "additionalProperties": false,
+      "description": "What the editor gathers from the real language server for each request.",
+      "properties": {
+        "signature": { "type": "boolean", "default": true, "description": "The signature of the call at the cursor." },
+        "timeoutMs": { "type": "integer", "minimum": 0, "default": 100, "description": "Longest wait for the language server." },
+        "tokenBudget": { "type": "integer", "minimum": 0, "default": 300, "description": "Most tokens of editor context in one prompt." }
+      }
+    },
+    "scoring": {
+      "type": "object", "additionalProperties": false,
+      "description": "Points that a plan section earns. Subject to change between versions.",
+      "properties": {
+        "glob": { "type": "number", "default": 10, "description": "The front-matter `files` of the section match the edited file." },
+        "file": { "type": "number", "default": 8, "description": "The section names the edited file." },
+        "symbol": { "type": "number", "default": 4, "description": "For each front-matter symbol near the cursor." },
+        "codeSpan": { "type": "number", "default": 2, "description": "For each name in a code span that is near the cursor, three at most." },
+        "heading": { "type": "number", "default": 2, "description": "A word of the heading is near the cursor." },
+        "words": { "type": "number", "default": 3, "description": "Times the share of the section's words that are near the cursor." }
+      }
+    }
+  }
+}

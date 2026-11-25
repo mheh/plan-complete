@@ -67,7 +67,7 @@ public enum Guide {
 
     /// One chunk per `## ` or `### ` section, plus one for text before the first section.
     public static func parse(markdown: String, source: String) -> [GuideChunk] {
-        let (front, body) = splitFrontMatter(markdown)
+        let (front, body) = splitFrontMatter(withoutComments(markdown))
         var chunks: [GuideChunk] = []
         var heading: String?
         var buffer: [String] = []
@@ -115,6 +115,18 @@ public enum Guide {
             .sorted { $0.path < $1.path }
     }
 
+    /// HTML comments are notes to the writer, not plan.
+    static func withoutComments(_ markdown: String) -> String {
+        var rest = Substring(markdown)
+        var out = ""
+        while let open = rest.range(of: "<!--") {
+            out += rest[..<open.lowerBound]
+            guard let close = rest[open.upperBound...].range(of: "-->") else { return out }
+            rest = rest[close.upperBound...]
+        }
+        return out + rest
+    }
+
     static func headingLevel(_ line: String) -> Int? {
         let hashes = line.prefix { $0 == "#" }.count
         guard hashes > 0, line.dropFirst(hashes).first == " " else { return nil }
@@ -128,22 +140,4 @@ public enum Guide {
         }
         return v
     }
-}
-
-public func relativePath(of url: URL, to root: URL) -> String {
-    let file = url.standardizedFileURL.resolvingSymlinksInPath()
-    let parts = file.pathComponents
-    let base = root.standardizedFileURL.resolvingSymlinksInPath().pathComponents
-    guard parts.count > base.count, zip(parts, base).allSatisfy(samePathComponent) else {
-        return file.path.replacingOccurrences(of: "\\", with: "/")
-    }
-    return parts.dropFirst(base.count).joined(separator: "/")
-}
-
-private func samePathComponent(_ a: String, _ b: String) -> Bool {
-    #if os(Windows)
-    return a.caseInsensitiveCompare(b) == .orderedSame
-    #else
-    return a == b
-    #endif
 }

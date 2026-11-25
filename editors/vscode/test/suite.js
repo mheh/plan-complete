@@ -19,10 +19,19 @@ exports.run = async function () {
   try {
     const line = Number(process.env.PC_LINE);
     const col = Number(process.env.PC_COL);
+    const enableFirst = process.env.PC_EXPECT === "enable";
     const expectActive = process.env.PC_EXPECT !== "off";
     const document = await vscode.workspace.openTextDocument(process.env.PC_FILE);
-    const editor = await vscode.window.showTextDocument(document);
+    let editor = await vscode.window.showTextDocument(document);
     await vscode.extensions.getExtension("plan-complete.plan-complete").activate();
+    let created;
+    if (enableFirst) {
+      const off = await waitStatus(false);
+      if (off.active) throw new Error("expected off before enable");
+      await vscode.commands.executeCommand("planComplete.enable");
+      created = vscode.window.activeTextEditor.document.fileName;
+      editor = await vscode.window.showTextDocument(document);
+    }
     const status = await waitStatus(expectActive);
     const before = document.getText();
     const position = new vscode.Position(line, col);
@@ -30,7 +39,7 @@ exports.run = async function () {
     const started = Date.now();
     let after = before;
     let attempts = 0;
-    for (; attempts < (expectActive ? 15 : 3) && after === before; ) {
+    for (; attempts < (expectActive && !enableFirst ? 15 : 3) && after === before; ) {
       attempts++;
       await vscode.commands.executeCommand("editor.action.inlineSuggest.trigger");
       await sleep(1500);
@@ -40,8 +49,8 @@ exports.run = async function () {
     }
     const inserted = after === before ? "" : diff(before, after);
     await vscode.commands.executeCommand("workbench.action.files.revert");
-    const ok = expectActive ? status.active && inserted.length > 0 : !status.active && inserted.length === 0;
-    write({ ok, status, ms: Date.now() - started, attempts, inserted, line: after.split("\n")[line] });
+    const ok = enableFirst ? status.active : expectActive ? status.active && inserted.length > 0 : !status.active && inserted.length === 0;
+    write({ ok, status, created, ms: Date.now() - started, attempts, inserted, line: after.split("\n")[line] });
   } catch (error) {
     write({ ok: false, error: String((error && error.stack) || error) });
   }

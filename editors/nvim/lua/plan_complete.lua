@@ -4,7 +4,8 @@
 --
 -- Attaches beside the real language server for every file type. The server stays quiet unless the
 -- project has a .plan-complete.json and its plan (PLAN.md by default).
--- <Tab> accepts, <M-]> / <M-[> cycle. :PlanCompleteToggle turns it off and on for this session.
+-- :PlanCompleteEnable opts the project in. <Tab> accepts, <M-]> / <M-[> cycle.
+-- :PlanCompleteToggle turns it off and on for this session.
 local M = {}
 
 local defaults = {
@@ -25,9 +26,12 @@ function M.status()
   return state
 end
 
---- A short text for a statusline: "Plan: on" or "Plan: off (no PLAN.md)".
+--- A short text for a statusline: "Plan: on", "Plan: no model" or "Plan: off (no PLAN.md)".
 function M.statusline()
-  return state.active and "Plan: on" or ("Plan: off (" .. state.reason .. ")")
+  if not state.active then
+    return "Plan: off (" .. state.reason .. ")"
+  end
+  return state.problem and "Plan: no model" or "Plan: on"
 end
 
 local function clients()
@@ -39,6 +43,26 @@ function M.set_enabled(value)
   for _, client in ipairs(clients()) do
     client:request("planComplete/setEnabled", { enabled = value }, function() end)
   end
+end
+
+--- Writes .plan-complete.json, and a starter plan when there is none, then opens the plan.
+function M.enable()
+  local client = clients()[1]
+  if not client then
+    return vim.notify("plan-complete: the server is not running", vim.log.levels.WARN)
+  end
+  M.set_enabled(true)
+  client:request("planComplete/enable", vim.empty_dict(), function(err, result)
+    if err then
+      return vim.notify("plan-complete: " .. err.message, vim.log.levels.ERROR)
+    end
+    for _, name in ipairs(result.created) do
+      if name:lower():match("%.md$") then
+        vim.cmd.edit(vim.fs.joinpath(client.root_dir, name))
+      end
+    end
+    vim.notify("plan-complete: " .. (#result.created > 0 and "wrote " .. table.concat(result.created, ", ") or "already enabled"))
+  end)
 end
 
 function M.toggle()
@@ -87,8 +111,9 @@ function M.setup(opts)
   end
 
   vim.api.nvim_create_user_command("PlanCompleteToggle", M.toggle, { desc = "Turn plan-complete off or on" })
+  vim.api.nvim_create_user_command("PlanCompleteEnable", M.enable, { desc = "Opt this project in to plan-complete" })
   vim.api.nvim_create_user_command("PlanCompleteStatus", function()
-    vim.notify("plan-complete: " .. M.statusline())
+    vim.notify("plan-complete: " .. M.statusline() .. (state.problem and (": " .. state.problem) or ""))
   end, { desc = "Show the plan state" })
 
   vim.lsp.inline_completion.enable()

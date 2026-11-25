@@ -3,11 +3,9 @@ import Testing
 import PlanCompleteCore
 @testable import PlanCompleteLSP
 
-final class Box: @unchecked Sendable {
-    private let lock = NSLock()
-    private var _messages: [JSONValue] = []
-    func append(_ m: JSONValue) { lock.withLock { _messages.append(m) } }
-    var messages: [JSONValue] { lock.withLock { _messages } }
+actor Box {
+    private(set) var messages: [JSONValue] = []
+    func append(_ message: JSONValue) { messages.append(message) }
 }
 
 struct SlowProvider: CompletionProvider {
@@ -33,7 +31,7 @@ struct SlowProvider: CompletionProvider {
 
     func makeServer(reply: String, delayMs: Int = 0) -> (LSPServer, Box) {
         let box = Box()
-        let server = LSPServer(send: { box.append($0) }, makeEngine: { root, config in
+        let server = LSPServer(send: { await box.append($0) }, makeEngine: { root, config in
             var c = config
             c.debounceMs = 0
             return Engine(root: root, config: c, provider: SlowProvider(reply: reply, delayMs: delayMs))
@@ -43,7 +41,7 @@ struct SlowProvider: CompletionProvider {
 
     func waitFor(_ box: Box, id: Int) async throws -> JSONValue {
         for _ in 0..<200 {
-            if let m = box.messages.first(where: { $0["id"] == .int(id) }) { return m }
+            if let m = await box.messages.first(where: { $0["id"] == .int(id) }) { return m }
             try await Task.sleep(for: .milliseconds(10))
         }
         throw CancellationError()
@@ -139,29 +137,33 @@ struct SlowProvider: CompletionProvider {
         return url
     }
 
-    func statuses(_ box: Box) -> [JSONValue] {
-        box.messages.filter { $0["method"] == "planComplete/status" }.compactMap { $0["params"] }
+    func status(_ active: Bool, _ reason: String) -> JSONValue {
+        ["active": .bool(active), "reason": .string(reason), "context": ["signature": true, "timeoutMs": 100, "tokenBudget": 300]]
+    }
+
+    func statuses(_ box: Box) async -> [JSONValue] {
+        await box.messages.filter { $0["method"] == "planComplete/status" }.compactMap { $0["params"] }
     }
 
     @Test func statusFollowsThePlan() async throws {
         let root = makeRoot(plan: false)
         let box = Box()
-        let server = LSPServer(send: { box.append($0) }, makeEngine: { r, c in
+        let server = LSPServer(send: { await box.append($0) }, makeEngine: { r, c in
             Engine(root: r, config: c, provider: SlowProvider(reply: "z", delayMs: 0))
         })
         await server.handle(["jsonrpc": "2.0", "id": 1, "method": "initialize",
                              "params": ["rootUri": .string(root.absoluteString), "capabilities": .object([:])]])
         await server.handle(["jsonrpc": "2.0", "method": "initialized", "params": .object([:])])
-        #expect(statuses(box).last == ["active": false, "reason": "no PLAN.md"])
+        #expect(await statuses(box).last == status(false, "no PLAN.md"))
 
         try "## Plan\nx".write(to: root.appendingPathComponent("PLAN.md"), atomically: true, encoding: .utf8)
         try await Task.sleep(for: .milliseconds(1100))
         await server.handle(["jsonrpc": "2.0", "method": "textDocument/didSave",
                              "params": ["textDocument": ["uri": .string(root.appendingPathComponent("PLAN.md").absoluteString)]]])
-        #expect(statuses(box).last == ["active": true, "reason": "PLAN.md"])
+        #expect(await statuses(box).last == status(true, "PLAN.md"))
 
         await server.handle(["jsonrpc": "2.0", "id": 2, "method": "planComplete/setEnabled", "params": ["enabled": false]])
-        #expect(statuses(box).last == ["active": false, "reason": "turned off"])
+        #expect(await statuses(box).last == status(false, "turned off"))
     }
 }
 
@@ -170,5 +172,79 @@ struct SlowProvider: CompletionProvider {
         #expect(LSPServer.localPath("/c:/Users/x/a.swift", windows: true) == "c:/Users/x/a.swift")
         #expect(LSPServer.localPath("/c:/Users/x/a.swift", windows: false) == "/c:/Users/x/a.swift")
         #expect(LSPServer.localPath("/home/x/a.swift", windows: true) == "/home/x/a.swift")
+    }
+}
+
+struct FailingProvider: CompletionProvider {
+    func complete(_ request: CompletionRequest) async throws -> String { throw URLError(.cannotConnectToHost) }
+}
+
+@Suite struct LSPSetupTests {
+    func start(_ root: URL, provider: any CompletionProvider = SlowProvider(reply: "z", delayMs: 0)) async -> (LSPServer, Box) {
+        let box = Box()
+        let server = LSPServer(send: { await box.append($0) }, makeEngine: { r, c in
+            var config = c
+            config.debounceMs = 0
+            return Engine(root: r, config: config, provider: provider)
+        })
+        await server.handle(["jsonrpc": "2.0", "id": 1, "method": "initialize",
+                             "params": ["rootUri": .string(root.absoluteString), "capabilities": .object([:])]])
+        return (server, box)
+    }
+
+    func emptyRoot() -> URL {
+        let url = FileManager.default.temporaryDirectory.appendingPathComponent("pc-lsp-\(UUID().uuidString)")
+        try? FileManager.default.createDirectory(at: url, withIntermediateDirectories: true)
+        return url
+    }
+
+    func lastStatus(_ box: Box) async -> JSONValue? {
+        await box.messages.last { $0["method"] == "planComplete/status" }?["params"]
+    }
+
+    @Test func enableTurnsARepositoryOn() async throws {
+        let root = emptyRoot()
+        let (server, box) = await start(root)
+        #expect(await lastStatus(box)?["reason"] == "no .plan-complete.json")
+        #expect(await lastStatus(box)?["context"]?["signature"] == true)
+        await server.handle(["jsonrpc": "2.0", "id": 2, "method": "planComplete/enable", "params": .object([:])])
+        let reply = await box.messages.first { $0["id"] == 2 }?["result"]
+        #expect(reply?["created"] == [".plan-complete.json", "PLAN.md"])
+        #expect(reply?["state"]?["active"] == true)
+        #expect(await lastStatus(box)?["active"] == true)
+    }
+
+    @Test func aDeadModelServerIsReported() async throws {
+        let root = emptyRoot()
+        try "{}".write(to: root.appendingPathComponent(".plan-complete.json"), atomically: true, encoding: .utf8)
+        try "## Plan\nx".write(to: root.appendingPathComponent("PLAN.md"), atomically: true, encoding: .utf8)
+        let (server, box) = await start(root, provider: FailingProvider())
+        let uri = root.appendingPathComponent("a.swift").absoluteString
+        await server.handle(["jsonrpc": "2.0", "method": "textDocument/didOpen",
+                             "params": ["textDocument": ["uri": .string(uri), "languageId": "swift", "version": 1, "text": "let a = "]]])
+        await server.handle(["jsonrpc": "2.0", "id": 2, "method": "textDocument/inlineCompletion",
+                             "params": ["textDocument": ["uri": .string(uri)], "position": ["line": 0, "character": 8],
+                                        "context": ["triggerKind": 2]]])
+        for _ in 0..<200 {
+            if await box.messages.contains(where: { $0["id"] == 2 }) { break }
+            try await Task.sleep(for: .milliseconds(10))
+        }
+        #expect(await lastStatus(box)?["problem"]?.stringValue?.hasPrefix("no model server at ") == true)
+        #expect(await lastStatus(box)?["active"] == true)
+    }
+}
+
+extension LSPSetupTests {
+    @Test func savingTheSettingsFileReloadsIt() async throws {
+        let root = emptyRoot()
+        let file = root.appendingPathComponent(".plan-complete.json")
+        try "{}".write(to: file, atomically: true, encoding: .utf8)
+        try "## Plan\nx".write(to: root.appendingPathComponent("PLAN.md"), atomically: true, encoding: .utf8)
+        let (server, box) = await start(root)
+        #expect(await lastStatus(box)?["context"]?["signature"] == true)
+        try #"{ "context": { "signature": false } } // off"#.write(to: file, atomically: true, encoding: .utf8)
+        await server.handle(["jsonrpc": "2.0", "method": "textDocument/didSave",
+                             "params": ["textDocument": ["uri": .string(file.absoluteString)]]])
+        #expect(await lastStatus(box)?["context"]?["signature"] == false)
     }
 }

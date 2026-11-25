@@ -66,6 +66,24 @@ public enum JSONValue: Sendable, Hashable, Codable {
         encoder.outputFormatting = [.withoutEscapingSlashes, .sortedKeys]
         return try encoder.encode(self)
     }
+
+    /// One line, with a space after each `:` and `,`.
+    public func encoded(spaced: Bool) throws -> Data {
+        guard spaced else { return try encoded() }
+        switch self {
+        case .object(let fields):
+            let parts = try fields.keys.sorted().map { key in
+                "\(String(decoding: try JSONValue.string(key).encoded(), as: UTF8.self)): "
+                    + String(decoding: try fields[key, default: .null].encoded(spaced: true), as: UTF8.self)
+            }
+            return Data((parts.isEmpty ? "{}" : "{ \(parts.joined(separator: ", ")) }").utf8)
+        case .array(let items):
+            let parts = try items.map { String(decoding: try $0.encoded(spaced: true), as: UTF8.self) }
+            return Data("[\(parts.joined(separator: ", "))]".utf8)
+        default:
+            return try encoded()
+        }
+    }
 }
 
 extension JSONValue: ExpressibleByStringLiteral, ExpressibleByIntegerLiteral, ExpressibleByBooleanLiteral,
@@ -85,5 +103,18 @@ extension JSONValue {
         guard case .object(var object) = self else { return self }
         object[key] = nil
         return .object(object)
+    }
+}
+
+extension JSONValue {
+    /// Objects merge key by key, at every depth; any other value of `other` replaces. `null` changes nothing.
+    public func merging(_ other: JSONValue) -> JSONValue {
+        guard case .object(var fields) = self, case .object(let overrides) = other else {
+            return other == .null ? self : other
+        }
+        for (key, value) in overrides {
+            fields[key] = fields[key]?.merging(value) ?? (value == .null ? nil : value)
+        }
+        return .object(fields)
     }
 }

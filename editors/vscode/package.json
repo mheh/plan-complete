@@ -2,13 +2,13 @@
   "name": "plan-complete",
   "displayName": "Plan Complete",
   "description": "Plan-guided inline completion from a local fill-in-the-middle model",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "publisher": "plan-complete",
   "license": "MIT",
   "private": true,
   "repository": {
     "type": "git",
-    "url": "local"
+    "url": "https://github.com/mheh/plan-complete.git"
   },
   "engines": {
     "vscode": "^1.91.0"
@@ -27,25 +27,73 @@
       "properties": {
         "planComplete.serverPath": {
           "type": "string",
-          "default": "plan-complete",
-          "description": "Path of the plan-complete binary."
+          "default": "",
+          "scope": "machine-overridable",
+          "markdownDescription": "Full path of the `plan-complete` binary. Empty: the binary inside the extension, then `plan-complete` on `PATH`."
         },
         "planComplete.settings": {
+          "$ref": "plan-complete-settings",
           "type": "object",
           "default": {},
-          "description": "Overrides of the server config (global file, then .plan-complete.json), for example { \"model\": \"qwen2.5-coder\", \"guide\": \"docs/plan\" }."
-        },
-        "planComplete.passSignatureHelp": {
-          "type": "boolean",
-          "default": true,
-          "description": "Send signature help from the real language server as context."
+          "markdownDescription": "Overrides of the server settings (the global file, then `.plan-complete.json`) for VS Code only, for example `{ \"model\": \"qwen2.5-coder\" }`. `guide` is ignored here."
         }
       }
     },
     "commands": [
       {
+        "command": "planComplete.enable",
+        "title": "Enable in This Workspace",
+        "category": "Plan Complete"
+      },
+      {
+        "command": "planComplete.toggle",
+        "title": "Toggle for This Workspace",
+        "category": "Plan Complete"
+      },
+      {
+        "command": "planComplete.openPlan",
+        "title": "Open the Plan",
+        "category": "Plan Complete"
+      },
+      {
+        "command": "planComplete.openSettings",
+        "title": "Open the Repository Settings",
+        "category": "Plan Complete"
+      },
+      {
+        "command": "planComplete.openGlobalSettings",
+        "title": "Open the Global Settings",
+        "category": "Plan Complete"
+      },
+      {
         "command": "planComplete.restart",
-        "title": "Plan Complete: Restart Server"
+        "title": "Restart Server",
+        "category": "Plan Complete"
+      },
+      {
+        "command": "planComplete.menu",
+        "title": "Show Options",
+        "category": "Plan Complete"
+      }
+    ],
+    "languages": [
+      {
+        "id": "jsonc",
+        "filenames": [
+          ".plan-complete.json"
+        ],
+        "filenamePatterns": [
+          "**/plan-complete/config.json"
+        ]
+      }
+    ],
+    "jsonValidation": [
+      {
+        "fileMatch": [
+          ".plan-complete.json",
+          "**/plan-complete/config.json"
+        ],
+        "url": "./schemas/plan-complete.schema.json"
       }
     ]
   },

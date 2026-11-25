@@ -1,7 +1,11 @@
 public struct GuideSelector: Sendable {
     public var budget: Int
+    public var scoring: Config.Scoring
 
-    public init(budget: Int) { self.budget = budget }
+    public init(budget: Int, scoring: Config.Scoring = .init()) {
+        self.budget = budget
+        self.scoring = scoring
+    }
 
     public struct Scored: Sendable, Equatable {
         public var chunk: GuideChunk
@@ -16,7 +20,7 @@ public struct GuideSelector: Sendable {
         let words = Self.words(in: window)
         var results: [(Scored, Int)] = []
         for (index, chunk) in chunks.enumerated() {
-            let score = Self.score(chunk, path: path, words: words)
+            let score = score(chunk, path: path, words: words)
             if score > 0 { results.append((Scored(chunk: chunk, score: score), index)) }
         }
         // Sections with no tie to the file or the cursor only fill in when nothing else matches.
@@ -39,25 +43,25 @@ public struct GuideSelector: Sendable {
         return kept
     }
 
-    static func score(_ chunk: GuideChunk, path: String, words: Set<String>) -> Double {
+    func score(_ chunk: GuideChunk, path: String, words: Set<String>) -> Double {
         var score = 0.0
         let fileMatch = chunk.files.contains { Glob.matches($0, path: path) }
-        if fileMatch { score += 10 } else if Self.mentions(chunk.text, path: path) { score += 8 }
+        if fileMatch { score += scoring.glob } else if Self.mentions(chunk.text, path: path) { score += scoring.file }
         let hits = chunk.symbols.filter { symbol in
-            symbolParts(symbol).contains { words.contains($0) }
+            Self.symbolParts(symbol).contains { words.contains($0) }
         }
-        score += Double(hits.count) * 4
+        score += Double(hits.count) * scoring.symbol
         if chunk.symbols.isEmpty {
             let named = Self.codeSpanWords(chunk.text).filter { $0.count > 2 && words.contains($0) }
-            score += Double(min(named.count, 3)) * 2
+            score += Double(min(named.count, 3)) * scoring.codeSpan
         }
         if let heading = chunk.heading, Self.words(in: heading).contains(where: { $0.count > 3 && words.contains($0) }) {
-            score += 2
+            score += scoring.heading
         }
         let chunkWords = Self.words(in: chunk.text).filter { $0.count > 3 }
         if !chunkWords.isEmpty {
             let overlap = chunkWords.filter { words.contains($0) }.count
-            score += 3 * Double(overlap) / Double(chunkWords.count)
+            score += scoring.words * Double(overlap) / Double(chunkWords.count)
         }
         if chunk.files.isEmpty && chunk.symbols.isEmpty { score += 0.5 }
         guard score > 0 else { return 0 }
@@ -88,7 +92,7 @@ public struct GuideSelector: Sendable {
         var result = Set<String>()
         var current = ""
         for ch in text.unicodeScalars {
-            if CharacterSetLike.isIdentifier(ch) { current.unicodeScalars.append(ch) }
+            if ch.isIdentifierPart { current.unicodeScalars.append(ch) }
             else if !current.isEmpty { result.insert(current); current = "" }
         }
         if !current.isEmpty { result.insert(current) }
@@ -96,8 +100,6 @@ public struct GuideSelector: Sendable {
     }
 }
 
-enum CharacterSetLike {
-    static func isIdentifier(_ s: Unicode.Scalar) -> Bool {
-        s == "_" || s.properties.isAlphabetic || ("0"..."9").contains(s)
-    }
+extension Unicode.Scalar {
+    var isIdentifierPart: Bool { self == "_" || properties.isAlphabetic || ("0"..."9").contains(self) }
 }

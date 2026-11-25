@@ -1,4 +1,4 @@
-// node test/run.js FILE LINE COL   (zero-based LINE and COL); needs PC_BIN.
+// node test/run.js FILE LINE COL   (zero-based LINE and COL). PC_BIN names the binary; without it the bundled one runs.
 const path = require("path");
 const os = require("os");
 const fs = require("fs");
@@ -10,7 +10,7 @@ const { runTests } = require("@vscode/test-electron");
   const userDir = fs.mkdtempSync(path.join(os.tmpdir(), "pc-vscode-user-"));
   fs.mkdirSync(path.join(userDir, "User"), { recursive: true });
   fs.writeFileSync(path.join(userDir, "User", "settings.json"),
-    JSON.stringify({ "planComplete.serverPath": process.env.PC_BIN, "planComplete.passSignatureHelp": true }));
+    JSON.stringify(process.env.PC_BIN ? { "planComplete.serverPath": process.env.PC_BIN } : {}));
   const workspace = path.dirname(path.resolve(file));
   await runTests({
     vscodeExecutablePath: process.env.PC_VSCODE || "/Applications/Visual Studio Code.app/Contents/MacOS/Code",

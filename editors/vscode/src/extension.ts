@@ -1,44 +1,41 @@
 import * as vscode from "vscode";
-import {
-  LanguageClient,
-  LanguageClientOptions,
-  ServerOptions,
-  TransportKind,
-} from "vscode-languageclient/node";
-
-let client: LanguageClient | undefined;
-let status: vscode.StatusBarItem;
-let workspaceState: vscode.Memento;
-let lastStatus: PlanStatus = { active: false, reason: "starting" };
+import { LanguageClient, LanguageClientOptions, ServerOptions, TransportKind } from "vscode-languageclient/node";
+import { contextMiddleware } from "./context";
+import { findServer } from "./server";
+import { PlanStatus, StatusItem } from "./status";
 
 const enabledKey = "planComplete.enabled";
+const helpURL = "https://github.com/mheh/plan-complete#requirements";
 
-interface PlanStatus {
-  active: boolean;
-  reason: string;
+let client: LanguageClient | undefined;
+let status: StatusItem;
+let extension: vscode.ExtensionContext;
+
+interface Files {
+  global: string;
+  repo: string;
+  plan: string;
 }
 
 export async function activate(context: vscode.ExtensionContext) {
-  workspaceState = context.workspaceState;
-  status = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Right, 100);
-  status.command = "planComplete.toggle";
+  extension = context;
+  status = new StatusItem("planComplete.menu");
+  const command = (name: string, run: () => unknown) => vscode.commands.registerCommand(`planComplete.${name}`, run);
   context.subscriptions.push(
     status,
-    vscode.commands.registerCommand("planComplete.restart", async () => {
-      await stop();
-      await start(context);
-    }),
-    vscode.commands.registerCommand("planComplete.toggle", toggle),
-    vscode.commands.registerCommand("planComplete.status", () => lastStatus),
-    vscode.workspace.onDidChangeConfiguration(async (event) => {
-      if (event.affectsConfiguration("planComplete")) {
-        await stop();
-        await start(context);
-      }
+    command("menu", menu),
+    command("enable", enable),
+    command("toggle", toggle),
+    command("restart", restart),
+    command("openPlan", () => open("plan")),
+    command("openSettings", () => open("repo")),
+    command("openGlobalSettings", () => open("global")),
+    command("status", () => status.current),
+    vscode.workspace.onDidChangeConfiguration((event) => {
+      if (event.affectsConfiguration("planComplete")) void restart();
     }),
   );
-  showStatus({ active: false, reason: "starting" });
-  await start(context);
+  await start();
 }
 
 export async function deactivate() {
@@ -46,48 +43,30 @@ export async function deactivate() {
 }
 
 function isEnabled(): boolean {
-  return workspaceState.get<boolean>(enabledKey, true);
+  return extension.workspaceState.get<boolean>(enabledKey, true);
 }
 
-async function toggle() {
-  const enabled = !isEnabled();
-  await workspaceState.update(enabledKey, enabled);
-  await client?.sendRequest("planComplete/setEnabled", { enabled });
-}
-
-function showStatus(state: PlanStatus) {
-  lastStatus = state;
-  status.text = state.active ? "$(sparkle) Plan: on" : "$(circle-slash) Plan: off";
-  status.tooltip = state.active
-    ? `Plan Complete follows ${state.reason}. Click to turn it off for this workspace.`
-    : `Plan Complete is off: ${state.reason}. Click to ${isEnabled() ? "check again" : "turn it on"}.`;
-  status.show();
-}
-
-async function start(context: vscode.ExtensionContext) {
-  const config = vscode.workspace.getConfiguration("planComplete");
-  const command = config.get<string>("serverPath", "plan-complete");
-  const serverOptions: ServerOptions = {
-    run: { command, args: ["serve"], transport: TransportKind.stdio },
-    debug: { command, args: ["serve"], transport: TransportKind.stdio },
-  };
+async function start() {
+  const server = findServer(extension);
+  const run = { command: server.command, args: ["serve"], transport: TransportKind.stdio };
+  const serverOptions: ServerOptions = { run, debug: run };
   const clientOptions: LanguageClientOptions = {
     documentSelector: [{ scheme: "file" }, { scheme: "untitled" }],
-    initializationOptions: config.get<object>("settings", {}),
-    middleware: config.get<boolean>("passSignatureHelp", true)
-      ? { provideInlineCompletionItems: withSignatureHelp }
-      : undefined,
+    initializationOptions: vscode.workspace.getConfiguration("planComplete").get<object>("settings", {}),
+    middleware: { provideInlineCompletionItems: contextMiddleware(() => client, () => status.current.context) },
   };
   client = new LanguageClient("planComplete", "Plan Complete", serverOptions, clientOptions);
-  client.onNotification("planComplete/status", showStatus);
-  context.subscriptions.push(client);
+  client.onNotification("planComplete/status", (state: PlanStatus) => status.show(state));
   try {
     await client.start();
     if (!isEnabled()) await client.sendRequest("planComplete/setEnabled", { enabled: false });
   } catch {
-    showStatus({ active: false, reason: "server did not start" });
-    void vscode.window.showErrorMessage(
-      `Plan Complete: cannot start "${command}". Set planComplete.serverPath to the full path of the binary.`);
+    client = undefined;
+    const where = server.source === "PATH" ? `"plan-complete" is not on PATH` : `cannot run "${server.command}"`;
+    status.show({ active: false, reason: "the server did not start", problem: where });
+    const pick = await vscode.window.showErrorMessage(
+      `Plan Complete: ${where}. Set planComplete.serverPath to the full path of the binary.`, "Open Setting");
+    if (pick) void vscode.commands.executeCommand("workbench.action.openSettings", "planComplete.serverPath");
   }
 }
 
@@ -101,33 +80,55 @@ async function stop() {
   }
 }
 
-/// Adds the signature of the call at the cursor, from the real language server, as `extraContext`.
-const withSignatureHelp: NonNullable<LanguageClientOptions["middleware"]>["provideInlineCompletionItems"] =
-  async (document, position, context, token, next) => {
-    const extra = await signatureContext(document, position);
-    if (!extra || !client) return next(document, position, context, token);
-    const params = {
-      ...client.code2ProtocolConverter.asInlineCompletionParams(document, position, context),
-      extraContext: [extra],
-    };
-    const result = await client.sendRequest("textDocument/inlineCompletion", params, token);
-    if (token.isCancellationRequested) return null;
-    return client.protocol2CodeConverter.asInlineCompletionResult(result as never, token);
-  };
+async function restart() {
+  await stop();
+  await start();
+}
 
-async function signatureContext(document: vscode.TextDocument, position: vscode.Position) {
-  const help = await Promise.race([
-    vscode.commands.executeCommand<vscode.SignatureHelp | undefined>(
-      "vscode.executeSignatureHelpProvider", document.uri, position),
-    new Promise<undefined>((resolve) => setTimeout(() => resolve(undefined), 150)),
-  ]);
-  if (!help || help.signatures.length === 0) return undefined;
-  const lines = help.signatures.map((signature) => {
-    const doc = typeof signature.documentation === "string"
-      ? signature.documentation
-      : signature.documentation?.value;
-    return doc ? `${signature.label}\n  ${doc.split("\n")[0]}` : signature.label;
-  });
-  const path = vscode.workspace.asRelativePath(document.uri);
-  return { path: `${path}.signature`, text: `Signatures at the cursor in ${path}:\n${lines.join("\n")}\n` };
+async function toggle() {
+  const enabled = !isEnabled();
+  await extension.workspaceState.update(enabledKey, enabled);
+  await client?.sendRequest("planComplete/setEnabled", { enabled });
+}
+
+async function enable() {
+  if (!client) return restart();
+  if (!isEnabled()) await toggle();
+  const reply = await client.sendRequest<{ created: string[] }>("planComplete/enable", {});
+  if (reply.created.some((name) => name.toLowerCase().endsWith(".md"))) await open("plan");
+}
+
+async function open(which: keyof Files) {
+  if (!client) return;
+  const files = await client.sendRequest<Files>("planComplete/files", { createGlobal: which === "global" });
+  try {
+    await vscode.window.showTextDocument(vscode.Uri.file(files[which]));
+  } catch {
+    void vscode.window.showWarningMessage(`Plan Complete: ${files[which]} does not exist. Run "Plan Complete: Enable in This Workspace".`);
+  }
+}
+
+async function menu() {
+  const state = status.current;
+  const items: (vscode.QuickPickItem & { run: () => unknown })[] = [];
+  const add = (label: string, detail: string, run: () => unknown) => items.push({ label, detail, run });
+  if (!client) {
+    add("$(debug-restart) Start the server", state.problem ?? state.reason, restart);
+    add("$(gear) Set the server path", "planComplete.serverPath",
+      () => vscode.commands.executeCommand("workbench.action.openSettings", "planComplete.serverPath"));
+  } else {
+    if (state.problem) add("$(warning) Model server help", state.problem, () => vscode.env.openExternal(vscode.Uri.parse(helpURL)));
+    if (!state.active && isEnabled()) {
+      add("$(sparkle) Enable in this workspace", `Off: ${state.reason}. Writes .plan-complete.json, and a starter plan when there is none.`, enable);
+    }
+    if (state.active) add("$(book) Open the plan", state.reason, () => open("plan"));
+    add(isEnabled() ? "$(circle-slash) Turn off for this workspace" : "$(sparkle) Turn on for this workspace",
+      "VS Code remembers this for the workspace.", toggle);
+    if (state.active) add("$(gear) Open the repository settings", ".plan-complete.json", () => open("repo"));
+    add("$(globe) Open the global settings", "Where your model server is, for every repository.", () => open("global"));
+    add("$(debug-restart) Restart the server", "", restart);
+    add("$(output) Show the log", "", () => client?.outputChannel.show());
+  }
+  const pick = await vscode.window.showQuickPick(items, { title: "Plan Complete" });
+  await pick?.run();
 }

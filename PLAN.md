@@ -32,8 +32,8 @@ Editors show the result as ghost text through `textDocument/inlineCompletion`.
   - Status carries `problem` (model server down, bad settings) and `context` (what the editor gathers).
   - VS Code: the binary is inside the extension; the status bar opens a menu; a JSON schema covers the
     settings files. Neovim: `:PlanCompleteEnable`. Both checked end to end.
-  - Release: CI builds a universal macOS binary, static Linux binaries (musl SDK, 58 MB) and a static Windows
-    binary, packages one `.vsix` for each VS Code target with `scripts/package.sh`, and on a `v*` tag makes
+  - Release: CI builds a universal macOS binary, static Linux binaries (musl SDK, 58 MB) and a Windows binary
+    with its Swift runtime DLLs beside it (`scripts/windows-bundle.ps1`; static linking fails there, no `curl.lib`), packages one `.vsix` for each VS Code target with `scripts/package.sh`, and on a `v*` tag makes
     the GitHub release. The Windows binary and the release job have not run yet.
 - Next, open:
   0. The symbol path: `context.symbols` (default on). The VS Code client caches `textDocument/documentSymbol`

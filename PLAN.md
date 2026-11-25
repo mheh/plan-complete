@@ -7,7 +7,7 @@ Editors show the result as ghost text through `textDocument/inlineCompletion`.
 
 ## STATUS
 
-- Done: Phases 0–4 (scaffold, core and probe, LSP server, Neovim, VS Code). 47 tests pass
+- Done: Phases 0–4 (scaffold, core and probe, LSP server, Neovim, VS Code). 49 tests pass
   (40 core, 7 LSP). Each editor has an end-to-end check that triggers, accepts, and reads the buffer.
 - Done after Phase 4, from a trial in a large Swift project:
   - Comment lines: no restated typed text, no double space, one line only, a two-line suffix, and one
@@ -20,6 +20,10 @@ Editors show the result as ghost text through `textDocument/inlineCompletion`.
 - Done: the opt-in rule. The server answers only with `<repo>/.plan-complete.json`, its plan, and the toggle
   on; otherwise it returns at once. It sends `planComplete/status` `{active, reason}`; VS Code shows it in the
   status bar and toggles per workspace; Neovim has `:PlanCompleteToggle`, `:PlanCompleteStatus`, `statusline()`.
+- Done: Linux and Windows. Linux is checked in Docker (Swift 6.2 and 6.4): the tests pass and a live LSP round
+  trip works. Windows paths are handled (`C:\` roots, `file:///c%3A/...`, `%APPDATA%`), and CI is its first test.
+- Done: CI (`.github/workflows/ci.yml`): Linux 6.2 and 6.4, macOS, Windows, and the VS Code extension. Actions are
+  pinned to commits. The `.build` cache is saved on master only; branches and pull requests restore it.
 - Next, open:
   0. Discuss: context from the real language server (enclosing symbol path, hover of the receiver, the
      declaration of the called name in another file), sent as `extraContext`, and plan sections matched by symbol.

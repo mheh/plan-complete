@@ -18,7 +18,7 @@ PLAN.md  ──▶  plan-complete serve  ──▶  llama-server /infill (or any
 
 ## Requirements
 
-- macOS 14 or later with Swift 6 (Xcode 16 or later). Linux is not tested.
+- Swift 6 on macOS 14 or later, Linux, or Windows. CI builds and tests all three (Swift 6.2 and 6.4).
 - A fill-in-the-middle model behind an HTTP server:
   - `llama-server` (llama.cpp) with a coder model that has FIM tokens. Qwen2.5-Coder, Qwen3-Coder and
     similar models work. For example:
@@ -40,7 +40,8 @@ ln -s "$PWD/.build/release/plan-complete" /usr/local/bin/plan-complete
 
 ### 2. Point it at your model, once, and opt a repository in
 
-`~/.config/plan-complete/config.json` (or `$XDG_CONFIG_HOME/plan-complete/config.json`):
+`~/.config/plan-complete/config.json` (or `$XDG_CONFIG_HOME/plan-complete/config.json`;
+on Windows, `%APPDATA%\plan-complete\config.json`):
 
 ```json
 {

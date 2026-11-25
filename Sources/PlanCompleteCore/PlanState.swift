@@ -1,6 +1,5 @@
 import Foundation
 
-/// Whether the server answers in a repository, and why not.
 public enum PlanState: Sendable, Equatable {
     case on(guide: String)
     case noConfig
@@ -18,8 +17,6 @@ public enum PlanState: Sendable, Equatable {
         }
     }
 
-    /// Needs `<root>/.plan-complete.json`, then the plan it names (`PLAN.md` by default):
-    /// a file, or a folder with at least one `.md` file.
     public static func check(root: URL, guide: String, enabled: Bool = true) -> PlanState {
         guard enabled else { return .disabled }
         let manager = FileManager.default

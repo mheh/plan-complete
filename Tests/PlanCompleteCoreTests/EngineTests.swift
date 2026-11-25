@@ -196,10 +196,17 @@ final class RecordingProvider: CompletionProvider, @unchecked Sendable {
     }
 
     @Test func unsafeGuideFallsBack() {
-        for bad in ["/etc", "../other", "a/../../b", "~/x", "", "  "] {
+        for bad in ["/etc", "../other", "a/../../b", "~/x", "", "  ", #"C:\plans"#, "c:/plans", #"\\server\share"#, #"..\other"#] {
             #expect(Config.safeGuide(bad) == "PLAN.md", "\(bad)")
         }
         #expect(Config.safeGuide("docs/plan") == "docs/plan")
+        #expect(Config.safeGuide(#"docs\plan"#) == "docs/plan")
+    }
+
+    @Test func relativePathUsesForwardSlashes() {
+        let root = URL(fileURLWithPath: NSTemporaryDirectory()).appendingPathComponent("pc-rel", isDirectory: true)
+        #expect(relativePath(of: root.appendingPathComponent("Sources/Net/Cache.swift"), to: root) == "Sources/Net/Cache.swift")
+        #expect(relativePath(of: root.appendingPathComponent("a.swift"), to: root.appendingPathComponent("a.swift")) != "")
     }
 
     @Test func states() throws {

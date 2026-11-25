@@ -51,7 +51,6 @@ public actor Engine {
         guideSignature = [:]
     }
 
-    /// Rechecked at most once a second. Off means every completion returns at once, with no model call.
     public func state(now: Date = Date()) -> PlanState {
         guard now.timeIntervalSince(lastStateCheck) >= 1 else { return planState }
         lastStateCheck = now

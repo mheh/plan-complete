@@ -164,3 +164,11 @@ struct SlowProvider: CompletionProvider {
         #expect(statuses(box).last == ["active": false, "reason": "turned off"])
     }
 }
+
+@Suite struct LSPPathTests {
+    @Test func windowsFileURIPathLosesTheLeadingSlash() {
+        #expect(LSPServer.localPath("/c:/Users/x/a.swift", windows: true) == "c:/Users/x/a.swift")
+        #expect(LSPServer.localPath("/c:/Users/x/a.swift", windows: false) == "/c:/Users/x/a.swift")
+        #expect(LSPServer.localPath("/home/x/a.swift", windows: true) == "/home/x/a.swift")
+    }
+}

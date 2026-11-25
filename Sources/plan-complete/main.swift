@@ -15,11 +15,13 @@ usage:
 
 func findRoot(from start: URL) -> URL {
     var dir = start.hasDirectoryPath ? start : start.deletingLastPathComponent()
-    while dir.path != "/" {
+    while true {
         for marker in [Config.fileName, Config.defaultGuide, ".git"] where FileManager.default.fileExists(atPath: dir.appendingPathComponent(marker).path) {
             return dir
         }
-        dir.deleteLastPathComponent()
+        let parent = dir.deletingLastPathComponent()
+        if parent.path == dir.path || dir.pathComponents.count <= 1 { break }
+        dir = parent
     }
     return start.deletingLastPathComponent()
 }

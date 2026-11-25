@@ -116,7 +116,6 @@ public actor LSPServer {
         await publishState(force: true)
     }
 
-    /// Sends `planComplete/status` when the state changed, or always with `force`.
     private func publishState(force: Bool) async {
         guard let engine else { return }
         let state = await engine.state()
@@ -235,7 +234,7 @@ public actor LSPServer {
 
     private func trace(_ text: String) {
         guard let path = Self.tracePath else { return }
-        if !FileManager.default.fileExists(atPath: path) { FileManager.default.createFile(atPath: path, contents: nil) }
+        if !FileManager.default.fileExists(atPath: path) { _ = FileManager.default.createFile(atPath: path, contents: nil) }
         guard let handle = FileHandle(forWritingAtPath: path) else { return }
         handle.seekToEndOfFile()
         handle.write(Data("\(Date().timeIntervalSince1970) \(text)\n".utf8))
@@ -244,7 +243,21 @@ public actor LSPServer {
 
     static func path(of uri: String) -> String {
         guard uri.hasPrefix("file:"), let url = URL(string: uri) else { return uri }
-        return url.path
+        return localPath(url.path)
+    }
+
+    static func localPath(_ path: String, windows: Bool = isWindows) -> String {
+        let chars = Array(path.prefix(3))
+        guard windows, chars.count == 3, chars[0] == "/", chars[1].isLetter, chars[2] == ":" else { return path }
+        return String(path.dropFirst())
+    }
+
+    static var isWindows: Bool {
+        #if os(Windows)
+        return true
+        #else
+        return false
+        #endif
     }
 
     static func range(_ value: JSONValue) -> (start: (Int, Int), end: (Int, Int))? {

@@ -60,7 +60,6 @@ public struct Config: Sendable, Equatable, Codable {
         return config
     }
 
-    /// Editor overrides apply to every field but the plan.
     public func applyingEditor(_ overrides: JSONValue?) throws -> Config {
         var config = try merged(with: overrides?.removing(Self.guideKey))
         config.guide = guide
@@ -69,19 +68,22 @@ public struct Config: Sendable, Equatable, Codable {
 
     static let guideKey = "guide"
 
-    /// A relative path inside the repository, or `PLAN.md`.
     public static func safeGuide(_ value: String) -> String {
-        let trimmed = value.trimmingCharacters(in: .whitespaces)
-        let parts = trimmed.split(separator: "/", omittingEmptySubsequences: true)
-        guard !trimmed.isEmpty, !trimmed.hasPrefix("/"), !trimmed.hasPrefix("~"),
+        let path = value.trimmingCharacters(in: .whitespaces).replacingOccurrences(of: "\\", with: "/")
+        let parts = path.split(separator: "/", omittingEmptySubsequences: true)
+        guard !path.isEmpty, !path.hasPrefix("/"), !path.hasPrefix("~"), !path.contains(":"),
               !parts.contains("..") else { return defaultGuide }
-        return trimmed
+        return path
     }
 
     /// `$XDG_CONFIG_HOME/plan-complete/config.json`, or `~/.config/plan-complete/config.json`.
     public static var globalFile: URL {
         let env = ProcessInfo.processInfo.environment
-        let base = env["XDG_CONFIG_HOME"].map { URL(fileURLWithPath: $0, isDirectory: true) }
+        var folder = env["XDG_CONFIG_HOME"]
+        #if os(Windows)
+        folder = folder ?? env["APPDATA"]
+        #endif
+        let base = folder.map { URL(fileURLWithPath: $0, isDirectory: true) }
             ?? FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent(".config", isDirectory: true)
         return base.appendingPathComponent("plan-complete/config.json")
     }

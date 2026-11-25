@@ -42,7 +42,22 @@ Editors show the result as ghost text through `textDocument/inlineCompletion`.
      The symbol path is built and the user ruled "keep it" (see Decisions).
      Neovim sends the symbol path too (`editors/nvim/lua/plan_complete/symbols.lua`; checked headless with
      typescript-language-server: the trace shows `RequestQueue > warm`).
-     THE USER ASKED FOR ITEM 2 BELOW: discuss the findings with the user before any change of the design.
+     THE USER ASKED FOR ITEM 2 BELOW. It is MEASURED (2026-11-25), and the findings wait for the user; no
+     design change yet. llama.vim (`autoload/llama.vim`, read in full) has no selection: it keeps a ring of 16
+     chunks of up to 64 lines, taken at random around the cursor of each buffer the user enters, leaves, saves
+     or yanks from, drops chunks that are alike, and sends all of them as `input_extra`.
+     - Plan selection: on the sample (15-line plan) the whole plan as chunks gives the same Python completion,
+       and an EMPTY one at `func ` in Swift (the `infill` sampler ends at once). On a 223-line plan with twelve
+       steps, the whole plan costs 1471 ms against our 991 ms, and one random chunk mostly holds the wrong
+       step. Our selection stays: it is the reason the right step is in a small prompt.
+     - Request shape, the real finding: llama.vim sends the text of the cursor line in `prompt` with
+       `n_indent`, and the server then stops where the block ends. We put the line into `input_prefix`, the
+       model runs to `n_predict` (128 tokens, then `}` many times) and `Postprocess` cuts it. Same completion,
+       measured on the sample: 1317 ms -> 431 ms at `func `, 1319 ms -> 184 ms at `self.init(`.
+       Proposed: send `prompt` and `n_indent` to `/infill` (llama.cpp only; the OpenAI provider stays).
+     - Not proposed: the `infill` sampler (empty answer at `func `), the random ring, `t_max_predict_ms`.
+     - Idea for later: llama.vim warms the server cache with the extra context while the user does not type
+       (`n_predict` 0). Our prompt time is already about 75 ms, so the gain is small.
   1. Symbol path, ideas that are not planned: the receiver type from hover (`context.hover`) and the
      declaration of the called name (`context.definition`).
   2. Compare guide selection with the llama.vim way (the guide open in a buffer, recent chunks in `input_extra`).

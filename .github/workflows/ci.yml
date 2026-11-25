@@ -1,0 +1,118 @@
+name: CI
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/master' }}
+
+permissions:
+  contents: read
+
+env:
+  SWIFT_WINDOWS_BRANCH: swift-6.4.2-release
+  SWIFT_WINDOWS_TAG: 6.4.2-RELEASE
+
+jobs:
+  linux:
+    name: Linux (Swift ${{ matrix.swift }})
+    runs-on: ubuntu-24.04
+    container: swift:${{ matrix.swift }}-noble
+    strategy:
+      fail-fast: false
+      matrix:
+        swift: ["6.2", "6.4"]
+    timeout-minutes: 45
+    steps:
+      - run: apt-get update -yq && apt-get install -y curl zstd
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - run: swift --version
+      - id: cache
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: .build
+          key: build-linux-${{ matrix.swift }}-${{ hashFiles('Package.swift', 'Sources/**', 'Tests/**') }}
+          restore-keys: build-linux-${{ matrix.swift }}-
+      - run: swift build --build-tests
+      - run: swift test --skip-build
+      - run: swift build -c release
+      - if: github.ref == 'refs/heads/master' && steps.cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: .build
+          key: ${{ steps.cache.outputs.cache-primary-key }}
+
+  macos:
+    name: macOS
+    runs-on: macos-26
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - run: swift --version
+      - id: cache
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: .build
+          key: build-macos-${{ hashFiles('Package.swift', 'Sources/**', 'Tests/**') }}
+          restore-keys: build-macos-
+      - run: swift build --build-tests
+      - run: swift test --skip-build
+      - run: swift build -c release
+      - if: github.ref == 'refs/heads/master' && steps.cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: .build
+          key: ${{ steps.cache.outputs.cache-primary-key }}
+
+  windows:
+    name: Windows
+    runs-on: windows-latest
+    timeout-minutes: 45
+    steps:
+      - uses: compnerd/gha-setup-swift@9ff1ee4c44888c5817fc14d1b257ac8cabb4935f # v0.5.1
+        with:
+          swift-version: ${{ env.SWIFT_WINDOWS_BRANCH }}
+          swift-build: ${{ env.SWIFT_WINDOWS_TAG }}
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - run: swift --version
+      - id: cache
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: .build
+          key: build-windows-${{ env.SWIFT_WINDOWS_TAG }}-${{ hashFiles('Package.swift', 'Sources/**', 'Tests/**') }}
+          restore-keys: build-windows-${{ env.SWIFT_WINDOWS_TAG }}-
+      - run: swift build --build-tests
+      - run: swift test --skip-build
+      - run: swift build -c release
+      - if: github.ref == 'refs/heads/master' && steps.cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: .build
+          key: ${{ steps.cache.outputs.cache-primary-key }}
+
+  vscode:
+    name: VS Code extension
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: editors/vscode
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: editors/vscode/package-lock.json
+      - run: npm ci --ignore-scripts
+      - run: npm run typecheck
+      - run: npm run package
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: plan-complete-vsix
+          path: editors/vscode/*.vsix
+          if-no-files-found: error

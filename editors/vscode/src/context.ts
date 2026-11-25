@@ -1,6 +1,7 @@
 import * as vscode from "vscode";
 import { LanguageClient, LanguageClientOptions } from "vscode-languageclient/node";
 import { ContextSettings } from "./status";
+import { PathSymbol, SymbolPaths } from "./symbols";
 
 type Middleware = NonNullable<LanguageClientOptions["middleware"]>;
 
@@ -14,16 +15,21 @@ interface ExtraContext {
 export function contextMiddleware(
   client: () => LanguageClient | undefined,
   settings: () => ContextSettings | undefined,
+  symbols: SymbolPaths,
 ): Middleware["provideInlineCompletionItems"] {
   return async (document, position, context, token, next) => {
     const active = client();
     const wanted = settings();
     if (!active || !wanted) return next(document, position, context, token);
-    const extras = (await gather(document, position, wanted)).filter((extra) => extra !== undefined);
-    if (extras.length === 0) return next(document, position, context, token);
-    const params = {
+    const [extras, symbolPath] = await Promise.all([
+      gather(document, position, wanted),
+      wanted.symbols ? within(wanted.timeoutMs, symbols.at(document, position)) : undefined,
+    ]);
+    if (extras.length === 0 && !symbolPath?.length) return next(document, position, context, token);
+    const params: Record<string, unknown> = {
       ...active.code2ProtocolConverter.asInlineCompletionParams(document, position, context),
       extraContext: extras,
+      symbolPath: symbolPath ?? ([] as PathSymbol[]),
     };
     const result = await active.sendRequest("textDocument/inlineCompletion", params, token);
     if (token.isCancellationRequested) return null;
@@ -31,10 +37,10 @@ export function contextMiddleware(
   };
 }
 
-function gather(document: vscode.TextDocument, position: vscode.Position, settings: ContextSettings) {
+async function gather(document: vscode.TextDocument, position: vscode.Position, settings: ContextSettings) {
   const sources: Promise<ExtraContext | undefined>[] = [];
   if (settings.signature) sources.push(within(settings.timeoutMs, signature(document, position)));
-  return Promise.all(sources);
+  return (await Promise.all(sources)).filter((extra) => extra !== undefined);
 }
 
 function within<T>(ms: number, work: Thenable<T | undefined>): Promise<T | undefined> {

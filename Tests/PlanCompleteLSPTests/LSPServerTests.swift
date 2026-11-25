@@ -73,6 +73,15 @@ struct SlowProvider: CompletionProvider {
         #expect(item?["range"]?["start"]?["character"] == 4)
     }
 
+    @Test func readsTheSymbolPath() {
+        let context = LSPServer.editorContext([
+            "extraContext": [["path": "a.signature", "text": "f()"]],
+            "symbolPath": [["name": "ResponseCache", "kind": 5], ["name": "store(_:for:)", "kind": 6], ["kind": 6]],
+        ])
+        #expect(context.files == [ExtraFile(path: "a.signature", text: "f()")])
+        #expect(context.symbols == SymbolPath(parsing: "ResponseCache > store(_:for:)"))
+    }
+
     @Test func incrementalEditsApply() async throws {
         let (server, box) = makeServer(reply: "x")
         await open(server, text: "let a = 1\n")
@@ -138,7 +147,7 @@ struct SlowProvider: CompletionProvider {
     }
 
     func status(_ active: Bool, _ reason: String) -> JSONValue {
-        ["active": .bool(active), "reason": .string(reason), "context": ["signature": true, "timeoutMs": 100, "tokenBudget": 300]]
+        ["active": .bool(active), "reason": .string(reason), "context": ["signature": true, "symbols": true, "timeoutMs": 100, "tokenBudget": 300]]
     }
 
     func statuses(_ box: Box) async -> [JSONValue] {

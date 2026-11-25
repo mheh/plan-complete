@@ -2,6 +2,7 @@ import * as vscode from "vscode";
 
 export interface ContextSettings {
   signature: boolean;
+  symbols: boolean;
   timeoutMs: number;
 }
 

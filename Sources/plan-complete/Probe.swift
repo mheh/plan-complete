@@ -29,13 +29,19 @@ func probe(_ args: [String]) async -> Int32 {
             if state == .noConfig { printError("run: plan-complete enable \(root.path)") }
             return 3
         }
+        var editorContext = EditorContext()
+        if let index = args.firstIndex(of: "--symbols"), index + 1 < args.count {
+            editorContext.symbols = SymbolPath(parsing: args[index + 1])
+        }
         if args.contains("--prompt") {
-            let prepared = await engine.prepare(document: document, line: line - 1, utf16Column: utf16Column)
+            let prepared = await engine.prepare(document: document, line: line - 1, utf16Column: utf16Column,
+                                                editorContext: editorContext)
             print(OpenAIFIMProvider.prompt(for: prepared.request))
             return 0
         }
         let start = Date()
-        let completion = try await engine.complete(document: document, line: line - 1, utf16Column: utf16Column)
+        let completion = try await engine.complete(document: document, line: line - 1, utf16Column: utf16Column,
+                                                   editorContext: editorContext)
         let ms = Int(Date().timeIntervalSince(start) * 1000)
         printError("[\(ms) ms] context: \(completion.sources.joined(separator: ", "))")
         if args.contains("--raw") { printError("raw: \(completion.raw.debugDescription)") }

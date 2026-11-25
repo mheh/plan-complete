@@ -82,9 +82,10 @@ public actor Engine {
         public var guide: [GuideChunk]
     }
 
-    /// `editorContext` is what the editor got from the real language server, for example signature help.
-    public func prepare(document: TextDocument, line: Int, utf16Column: Int, editorContext: [ExtraFile] = []) -> Prepared {
-        let editorContext = Self.trimmed(editorContext, tokens: config.context.tokenBudget)
+    public func prepare(document: TextDocument, line: Int, utf16Column: Int,
+                        editorContext: EditorContext = .init()) -> Prepared {
+        let symbols = config.context.symbols ? editorContext.symbols : SymbolPath()
+        let editorContext = Self.trimmed(editorContext.files, tokens: config.context.tokenBudget)
         let context = document.context(line: line, utf16Column: utf16Column,
                                        prefixLines: config.prefixLines, suffixLines: config.suffixLines)
         let path = relativePath(of: URL(fileURLWithPath: document.path), to: root)
@@ -93,7 +94,7 @@ public actor Engine {
             let window = context.window + "\n" + context.scope.outline.joined(separator: "\n")
                 + "\n" + editorContext.map(\.text).joined(separator: "\n")
             selected = GuideSelector(budget: config.guideTokenBudget, scoring: config.scoring)
-                .select(chunks: guide(), path: path, window: window)
+                .select(chunks: guide(), path: path, window: window, symbols: symbols)
         }
         var extras = Self.extras(from: selected)
         if config.useScope {
@@ -143,7 +144,7 @@ public actor Engine {
     }
 
     public func complete(document: TextDocument, line: Int, utf16Column: Int,
-                         editorContext: [ExtraFile] = []) async throws -> Completion {
+                         editorContext: EditorContext = .init()) async throws -> Completion {
         if !bypassPlanRule, !state().isOn { return Completion(text: "", sources: [], fromCache: false, raw: "") }
         let prepared = prepare(document: document, line: line, utf16Column: utf16Column, editorContext: editorContext)
         let request = prepared.request

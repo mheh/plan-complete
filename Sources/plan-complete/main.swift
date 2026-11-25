@@ -13,6 +13,7 @@ usage:
     --root DIR       workspace root (default: nearest parent with .plan-complete.json, PLAN.md or .git)
     --no-guide       leave the plan out, and run even when the plan rule is off
     --no-scope       leave the scope summary out
+    --symbols PATH   what encloses the cursor, as an editor sends it: "ResponseCache>store()"
     --prompt         print the request instead of calling the model
     --raw            also print the raw model text
   plan-complete --version

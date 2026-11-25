@@ -29,6 +29,7 @@
       "description": "What the editor gathers from the real language server for each request.",
       "properties": {
         "signature": { "type": "boolean", "default": true, "description": "The signature of the call at the cursor." },
+        "symbols": { "type": "boolean", "default": true, "description": "The type and the member that enclose the cursor, to rank the plan." },
         "timeoutMs": { "type": "integer", "minimum": 0, "default": 100, "description": "Longest wait for the language server." },
         "tokenBudget": { "type": "integer", "minimum": 0, "default": 300, "description": "Most tokens of editor context in one prompt." }
       }
@@ -40,6 +41,8 @@
         "glob": { "type": "number", "default": 10, "description": "The front-matter `files` of the section match the edited file." },
         "file": { "type": "number", "default": 8, "description": "The section names the edited file." },
         "symbol": { "type": "number", "default": 4, "description": "For each front-matter symbol near the cursor." },
+        "type": { "type": "number", "default": 8, "description": "The section names a type that encloses the cursor." },
+        "member": { "type": "number", "default": 4, "description": "The section names the function or the property that encloses the cursor." },
         "codeSpan": { "type": "number", "default": 2, "description": "For each name in a code span that is near the cursor, three at most." },
         "heading": { "type": "number", "default": 2, "description": "A word of the heading is near the cursor." },
         "words": { "type": "number", "default": 3, "description": "Times the share of the section's words that are near the cursor." }

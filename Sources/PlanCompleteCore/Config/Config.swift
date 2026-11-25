@@ -26,6 +26,7 @@ public struct Config: Sendable, Equatable, Codable {
     /// What the editor gathers from the real language server.
     public struct Context: Sendable, Equatable, Codable {
         public var signature = true
+        public var symbols = true
         public var timeoutMs = 100
         public var tokenBudget = 300
         public init() {}
@@ -36,6 +37,8 @@ public struct Config: Sendable, Equatable, Codable {
         public var glob = 10.0
         public var file = 8.0
         public var symbol = 4.0
+        public var type = 8.0
+        public var member = 4.0
         public var codeSpan = 2.0
         public var heading = 2.0
         public var words = 3.0

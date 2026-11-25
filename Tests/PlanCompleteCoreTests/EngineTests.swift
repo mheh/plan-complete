@@ -45,7 +45,7 @@ import Testing
         let engine = Engine(root: root, config: folderConfig, provider: provider)
         let doc = TextDocument(path: root.appendingPathComponent("a.swift").path, text: "struct A {\n    func f() {\n        g(\n    }\n}")
         let lsp = ExtraFile(path: "a.swift.signature", text: "g(count: Int)")
-        _ = try await engine.complete(document: doc, line: 2, utf16Column: 10, editorContext: [lsp])
+        _ = try await engine.complete(document: doc, line: 2, utf16Column: 10, editorContext: EditorContext(files: [lsp]))
         #expect(await provider.requests.first?.extras.map(\.path) == ["a.swift.signature"])
     }
 

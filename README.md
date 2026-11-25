@@ -106,6 +106,7 @@ plan-complete config [DIR]     # the settings in effect, and the files they come
 plan-complete probe Sources/Foo.swift:42:9             # one completion; LINE and COL are 1-based
 plan-complete probe Sources/Foo.swift:42:9 --prompt    # print the exact prompt
 plan-complete probe Sources/Foo.swift:42:9 --no-guide  # compare without the plan
+plan-complete probe Sources/Foo.swift:42:9 --symbols "Foo>bar()"  # as if the editor said: inside bar of Foo
 ```
 
 `probe` prints `context: PLAN.md#<heading>` for the sections that it used. When the repository is not opted
@@ -153,6 +154,7 @@ For example, a model behind a proxy on another machine, in the global file:
 | Field | Default | Meaning |
 |---|---|---|
 | `context.signature` | `true` | The signature of the call at the cursor (VS Code) |
+| `context.symbols` | `true` | The type and the member that enclose the cursor, to rank the plan (VS Code) |
 | `context.timeoutMs` | `100` | Longest wait for the language server |
 | `context.tokenBudget` | `300` | Most tokens of editor context in one prompt |
 
@@ -163,6 +165,8 @@ For example, a model behind a proxy on another machine, in the global file:
 | `scoring.glob` | `10` | its front-matter `files` match the edited file |
 | `scoring.file` | `8` | it names the edited file |
 | `scoring.symbol` | `4` | a front-matter symbol is near the cursor (each) |
+| `scoring.type` | `8` | it names a type that encloses the cursor |
+| `scoring.member` | `4` | it names the function or the property that encloses the cursor |
 | `scoring.codeSpan` | `2` | a name in a code span is near the cursor (each, three at most) |
 | `scoring.heading` | `2` | a word of its heading is near the cursor |
 | `scoring.words` | `3` | times the share of its words that are near the cursor |

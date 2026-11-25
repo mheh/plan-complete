@@ -23,7 +23,7 @@ Editors show the result as ghost text through `textDocument/inlineCompletion`.
   trip works. Windows paths are handled (`C:\` roots, `file:///c%3A/...`, `%APPDATA%`), and CI is its first test.
 - Done: CI (`.github/workflows/ci.yml`): Linux 6.2 and 6.4, macOS, Windows, and the VS Code extension. Actions are
   pinned to commits. The `.build` cache is saved on master only; branches and pull requests restore it.
-- Done: version 0.2.0, "usable from a default install". 65 tests pass (54 core, 11 LSP) on macOS and on Linux
+- Done: version 0.2.0, "usable from a default install". 75 tests pass (63 core, 12 LSP) on macOS and on Linux
   in Docker (Swift 6.2 and 6.4).
   - Settings: nested `context` and `scoring`; layers merge field by field; the files allow comments and
     trailing commas; saving a settings file in the editor reloads it.
@@ -33,21 +33,17 @@ Editors show the result as ghost text through `textDocument/inlineCompletion`.
   - VS Code: the binary is inside the extension; the status bar opens a menu; a JSON schema covers the
     settings files. Neovim: `:PlanCompleteEnable`. Both checked end to end.
   - Release: CI builds a universal macOS binary, static Linux binaries (musl SDK, 58 MB) and a Windows binary
-    with its Swift runtime DLLs beside it (`scripts/windows-bundle.ps1`; static linking fails there, no `curl.lib`), packages one `.vsix` for each VS Code target with `scripts/package.sh`, and on a `v*` tag makes
-    the GitHub release. The Windows binary and the release job have not run yet.
+    with its Swift runtime DLLs beside it (`scripts/windows-bundle.ps1`; static linking fails there, no `curl.lib`), packages one `.vsix` for each
+    VS Code target with `scripts/package.sh`, and on a `v*` tag makes the GitHub release. The release job
+    has not run yet.
 - Next, open:
-  0. RESUME HERE (2026-11-25). CI is green on master (run 45567976892): all platforms, every `.vsix` packaged.
-     `v0.2.0` is NOT tagged; the user decides. The release job has never run.
-     - Then the symbol path, below.
-  1. The symbol path: `context.symbols` (default on). The VS Code client caches `textDocument/documentSymbol`
-     for each file and sends the enclosing path (`ResponseCache > init()`) as `extraContext`. The server scores
-     a section that names the enclosing type +8 and the member +4 (`scoring.type`, `scoring.member`), and
-     ignores generic names (`init`, `body`, `description`, under four characters). Compare with and without it
-     on `examples/sample`, then decide on the receiver type from hover (`context.hover`, 100 ms limit) and on the
-     declaration of the called name (`context.definition`). Neovim after the format settles.
-  1. Compare guide selection with the llama.vim way (the guide open in a buffer, recent chunks in `input_extra`).
-  2. Phase 5, Xcode: choose between the two options below.
-  3. Tag `v0.2.0` after CI is green, and check the Windows `.vsix` on a Windows machine.
+  0. RESUME HERE (2026-11-25). `v0.2.0` is NOT tagged; the user decides. The release job has never run.
+     The symbol path is built and the user ruled "keep it" (see Decisions). Next: the items below.
+  1. Symbol path, what is left: Neovim sends no `symbolPath` yet (VS Code does). The receiver type from hover
+     (`context.hover`) and the declaration of the called name (`context.definition`) are ideas, not planned.
+  2. Compare guide selection with the llama.vim way (the guide open in a buffer, recent chunks in `input_extra`).
+  3. Phase 5, Xcode: choose between the two options below.
+  4. Tag `v0.2.0` after CI is green, and check the Windows `.vsix` on a Windows machine.
 - Restart from here: read this block, then the item marked next.
 
 ## Measured
@@ -99,7 +95,7 @@ On a 9B Qwen-format coder model on one consumer GPU (llama-server, about 100 tok
   an extra file `<path>.scope`. A client can send richer context from the real language server in
   `params.extraContext: [{path, text}]`, which replaces the scope summary; the VS Code client sends signature help.
   When the cursor is in an open call, the completion ends where that call closes.
-- **Cleanup is text only:** FIM tokens, text that repeats the rest of the line or the next line, lines that leave
+- **Cleanup is text only:** FIM tokens, a line or a group of lines that the model repeats, text that repeats the rest of the line or the next line, lines that leave
   the cursor's block, repeated typed words, comment-line rules above.
 - **Defaults point at a local llama-server** (`http://127.0.0.1:8012`). The model server goes in the global file.
   This repository opts in with a root `.plan-complete.json`, which git ignores here.
@@ -109,6 +105,16 @@ On a 9B Qwen-format coder model on one consumer GPU (llama-server, about 100 tok
   AsyncHTTPClient (about 20 MB, about 20 packages, 114 s clean build, no Windows support yet); our own
   plain-HTTP client (about 10 MB, no HTTPS); linker flags (`--gc-sections`, `--icf=all`, `-Osize` save 0.5%:
   37 MB is read-only data); jemalloc (an allocator, not a size tool).
+- **The symbol path ranks the plan; it does not go into the prompt.** The editor sends the symbols that enclose
+  the cursor (`params.symbolPath: [{name, kind}]`, from `textDocument/documentSymbol`, cached for each document
+  version). A section that names an enclosing type earns `scoring.type` (8), the member `scoring.member` (4);
+  generic names (`init`, `body`, …) and names under four characters earn nothing. `context.symbols` turns it
+  off. `probe --symbols "RequestQueue>warm()"` tries it with no editor. Measured: the indentation outline
+  already gives the same ranking in most code. It changed the result in one case: nearby code names another
+  type, and the plan is too long for every tied section (forced with `guideTokenBudget` 80): the right
+  section got in, and the model wrote the plan's call in place of an invented one. Rejected: the path as a
+  line of the scope summary in the prompt; tried, and the completions got no better (TypeScript) or worse
+  (Python). No reference gives weights for a plan; Continue's "root path context" is the nearest idea.
 - **Minimal code comments.** Only where the code cannot say it.
 - **Actors, no locks.** Shared state lives in an actor (`Engine`, `LSPServer`, the test doubles). No mutex, no
   `@unchecked Sendable`.
@@ -145,9 +151,10 @@ The server rereads the plan at most once a second.
   "guide": "PLAN.md", "guideTokenBudget": 1200, "maxTokens": 64, "maxLines": 12,
   "prefixLines": 80, "suffixLines": 40, "timeoutMs": 4000, "debounceMs": 60,
   "useGuide": true, "useScope": true,
-  "context": { "signature": true, "timeoutMs": 100, "tokenBudget": 300 },
+  "context": { "signature": true, "symbols": true, "timeoutMs": 100, "tokenBudget": 300 },
   // Subject to change between versions.
-  "scoring": { "glob": 10, "file": 8, "symbol": 4, "codeSpan": 2, "heading": 2, "words": 3 } }
+  "scoring": { "glob": 10, "file": 8, "symbol": 4, "type": 8, "member": 4,
+               "codeSpan": 2, "heading": 2, "words": 3 } }
 ```
 
 LSP `initializationOptions` (VS Code `planComplete.settings`, Neovim `settings`) override both files.
@@ -163,7 +170,7 @@ Sources/PlanCompleteCore/
   Engine.swift               one completion: plan state, prompt, model call, cleanup, cache
   Config/                    Config (fields, layers), Setup (enable, the file templates)
   Plan/                      Guide (Markdown to chunks), GuideSelector (scoring), Glob, PlanState (the opt-in rule)
-  Text/                      TextDocument, ScopeContext, Postprocess
+  Text/                      TextDocument, ScopeContext, SymbolPath, EditorContext, Postprocess
   Model/                     CompletionProvider, LlamaInfillProvider, OpenAIFIMProvider, JSONPoster, ModelFailure
   Support/                   JSONValue, JSONC, LRUCache, RelativePath, Version
 Sources/PlanCompleteLSP/     LSPServer (state and dispatch), InlineCompletion, Wire (replies, log, ranges),
@@ -172,7 +179,7 @@ Sources/plan-complete/       main (usage and dispatch), Commands (`enable`, `con
 Tests/PlanCompleteCoreTests/ one file for each subject; Support.swift has the shared helpers
 Tests/PlanCompleteLSPTests/  server in process, framing
 editors/nvim/lua/plan_complete.lua
-editors/vscode/              src/{extension,server,status,context}.ts, schemas/, test/run.js (end-to-end)
+editors/vscode/              src/{extension,server,status,context,symbols}.ts, schemas/, test/run.js (end-to-end)
 scripts/                     lsp-smoke.mjs, nvim-smoke.lua, package.sh (the .vsix files and archives)
 examples/sample/             Swift and Python files with a plain PLAN.md
 ```

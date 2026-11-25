@@ -25,10 +25,8 @@ extension LSPServer {
                 : (range.start.0 + lines.count - 1, lines.last?.utf16.count ?? 0)
             insertPrefix = text
         }
-        let editorContext = (params["extraContext"]?.arrayValue ?? []).compactMap { item -> ExtraFile? in
-            guard let path = item["path"]?.stringValue, let text = item["text"]?.stringValue else { return nil }
-            return ExtraFile(path: path, text: text)
-        }
+        let editorContext = Self.editorContext(params)
+        if !editorContext.symbols.isEmpty { trace("symbols \(id) \(editorContext.symbols)") }
 
         pending.removeValue(forKey: uri)?.task.cancel()
         let snapshot = document
@@ -71,6 +69,18 @@ extension LSPServer {
         }
         pending[uri] = (id, task)
         tasksByID[id] = task
+    }
+
+    static func editorContext(_ params: JSONValue) -> EditorContext {
+        let files = (params["extraContext"]?.arrayValue ?? []).compactMap { item -> ExtraFile? in
+            guard let path = item["path"]?.stringValue, let text = item["text"]?.stringValue else { return nil }
+            return ExtraFile(path: path, text: text)
+        }
+        let symbols = (params["symbolPath"]?.arrayValue ?? []).compactMap { item -> SymbolPath.Symbol? in
+            guard let name = item["name"]?.stringValue, let kind = item["kind"]?.intValue else { return nil }
+            return SymbolPath.Symbol(name: name, lspKind: kind)
+        }
+        return EditorContext(files: files, symbols: SymbolPath(symbols))
     }
 
     func finish(uri: String, id: JSONValue, cancelled: Bool) async {

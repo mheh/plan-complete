@@ -3,12 +3,14 @@ import { LanguageClient, LanguageClientOptions, ServerOptions, TransportKind } f
 import { contextMiddleware } from "./context";
 import { findServer } from "./server";
 import { PlanStatus, StatusItem } from "./status";
+import { SymbolPaths } from "./symbols";
 
 const enabledKey = "planComplete.enabled";
 const helpURL = "https://github.com/mheh/plan-complete#requirements";
 
 let client: LanguageClient | undefined;
 let status: StatusItem;
+let symbols: SymbolPaths;
 let extension: vscode.ExtensionContext;
 
 interface Files {
@@ -20,6 +22,7 @@ interface Files {
 export async function activate(context: vscode.ExtensionContext) {
   extension = context;
   status = new StatusItem("planComplete.menu");
+  symbols = new SymbolPaths(context.subscriptions);
   const command = (name: string, run: () => unknown) => vscode.commands.registerCommand(`planComplete.${name}`, run);
   context.subscriptions.push(
     status,
@@ -53,7 +56,9 @@ async function start() {
   const clientOptions: LanguageClientOptions = {
     documentSelector: [{ scheme: "file" }, { scheme: "untitled" }],
     initializationOptions: vscode.workspace.getConfiguration("planComplete").get<object>("settings", {}),
-    middleware: { provideInlineCompletionItems: contextMiddleware(() => client, () => status.current.context) },
+    middleware: {
+      provideInlineCompletionItems: contextMiddleware(() => client, () => status.current.context, symbols),
+    },
   };
   client = new LanguageClient("planComplete", "Plan Complete", serverOptions, clientOptions);
   client.onNotification("planComplete/status", (state: PlanStatus) => status.show(state));
